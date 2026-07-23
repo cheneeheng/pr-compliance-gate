@@ -1,0 +1,7 @@
+{
+  "pr_id": "002_new_dependency",
+  "title": "Add PDF export via report-forge",
+  "expected_classification": "dependency",
+  "expected_route": "human_gate",
+  "expected_outcome": "rejected"
+}

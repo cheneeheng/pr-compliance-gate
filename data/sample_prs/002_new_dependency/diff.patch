@@ -1,0 +1,24 @@
+diff --git a/pyproject.toml b/pyproject.toml
+index 2b3c4d5..6e7f8a9 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -5,6 +5,7 @@ requires-python = ">=3.12"
+ dependencies = [
+     "fastapi>=0.115",
+     "uvicorn>=0.30",
++    "report-forge>=2.0",  # PDF export; distributed under GPL-3.0
+ ]
+
+ [build-system]
+diff --git a/src/acme/reports.py b/src/acme/reports.py
+index 0000000..1234567 100644
+--- a/src/acme/reports.py
++++ b/src/acme/reports.py
+@@ -1,2 +1,8 @@
+ """Order report generation."""
++
++from report_forge import PdfBuilder
++
++
++def order_pdf(order: dict) -> bytes:
++    return PdfBuilder().render(order)

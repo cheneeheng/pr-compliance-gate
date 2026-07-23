@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PR Compliance Gate</title>
+  <style>
+    :root {
+      --bg: #0f1117; --panel: #181b24; --border: #2a2f3a; --text: #e6e8ee;
+      --muted: #9aa2b1; --accent: #4f8cff; --ok: #2e7d32; --warn: #b8860b; --block: #c0392b;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 15px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--text); }
+    header { padding: 16px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; }
+    h1 { font-size: 18px; margin: 0; }
+    main { max-width: 960px; margin: 0 auto; padding: 24px; }
+    button { font: inherit; cursor: pointer; border: 1px solid var(--border); background: #222634; color: var(--text); border-radius: 6px; padding: 8px 14px; }
+    button:hover:not(:disabled) { border-color: var(--accent); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    select, textarea, input { font: inherit; background: #222634; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+    a.link { color: var(--accent); cursor: pointer; text-decoration: none; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 600; font-size: 13px; }
+    .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; border: 1px solid var(--border); }
+    .badge.running { color: var(--accent); border-color: var(--accent); }
+    .badge.awaiting_human { color: var(--warn); border-color: var(--warn); }
+    .badge.done { color: var(--ok); border-color: var(--ok); }
+    .sev-info { color: var(--muted); } .sev-warn { color: var(--warn); } .sev-block { color: var(--block); font-weight: 600; }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    .panel h3 { margin: 0 0 8px; font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .muted { color: var(--muted); }
+    .banner { background: #3a1c1c; border: 1px solid var(--block); color: #ffb4a8; padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; }
+    .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+    .row { display: flex; gap: 16px; flex-wrap: wrap; }
+    .row > div { flex: 1; min-width: 160px; }
+    dl { margin: 0; } dt { color: var(--muted); font-size: 13px; } dd { margin: 0 0 8px; }
+    pre { white-space: pre-wrap; word-break: break-word; margin: 0; }
+    textarea { width: 100%; min-height: 60px; resize: vertical; }
+    .spinner { color: var(--muted); font-style: italic; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>PR Compliance Gate</h1>
+    <a class="link" id="home-link">Reviews</a>
+  </header>
+  <main>
+    <div id="banner-slot"></div>
+    <div id="view"></div>
+  </main>
+
+  <script>
+    const API = "";
+    const $ = (html) => { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstChild; };
+    const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+    let pollTimer = null;
+    const stopPolling = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } };
+
+    function showError(msg) {
+      document.getElementById("banner-slot").innerHTML = `<div class="banner" role="alert">${esc(msg)}</div>`;
+    }
+    function clearError() { document.getElementById("banner-slot").innerHTML = ""; }
+
+    async function api(path, opts) {
+      const res = await fetch(API + path, opts);
+      if (res.status === 204) return null;
+      const body = res.headers.get("content-type")?.includes("json") ? await res.json() : null;
+      if (!res.ok) { const err = new Error(body?.error || res.statusText); err.status = res.status; throw err; }
+      return body;
+    }
+
+    // ---- Review list ----
+    async function renderList() {
+      stopPolling();
+      const view = document.getElementById("view");
+      view.innerHTML = `<div class="spinner">Loading…</div>`;
+      let prs = [], reviews = [];
+      try {
+        [prs, reviews] = await Promise.all([api("/api/prs"), api("/api/reviews")]);
+        clearError();
+      } catch (e) { showError("Could not load reviews: " + e.message); }
+
+      const options = prs.map((p) => `<option value="${esc(p.pr_id)}">${esc(p.title)} (${p.files_changed_count} files)</option>`).join("");
+      const rows = reviews.map((r) => `
+        <tr>
+          <td><a class="link" data-thread="${esc(r.thread_id)}">${esc(r.pr_id)}</a></td>
+          <td><span class="badge ${esc(r.status)}">${esc(r.status)}</span></td>
+          <td>${r.risk_level ? esc(r.risk_level) : "—"}</td>
+        </tr>`).join("");
+
+      view.innerHTML = `
+        <div class="toolbar">
+          <select id="pr-select" aria-label="Sample PR">${options}</select>
+          <button class="primary" id="start-btn">Start review</button>
+        </div>
+        ${reviews.length ? `<table><thead><tr><th>PR</th><th>Status</th><th>Risk</th></tr></thead><tbody>${rows}</tbody></table>`
+                         : `<p class="muted">No reviews yet — start one above.</p>`}`;
+
+      document.getElementById("start-btn").onclick = startReview;
+      view.querySelectorAll("[data-thread]").forEach((a) => { a.onclick = () => renderDetail(a.dataset.thread); });
+      pollTimer = setInterval(async () => {
+        try { const rs = await api("/api/reviews"); patchListStatuses(rs); } catch { /* keep last view */ }
+      }, 5000);
+    }
+
+    function patchListStatuses(reviews) {
+      const map = Object.fromEntries(reviews.map((r) => [r.thread_id, r]));
+      document.querySelectorAll("[data-thread]").forEach((a) => {
+        const r = map[a.dataset.thread]; if (!r) return;
+        const tr = a.closest("tr");
+        tr.children[1].innerHTML = `<span class="badge ${esc(r.status)}">${esc(r.status)}</span>`;
+        tr.children[2].textContent = r.risk_level || "—";
+      });
+    }
+
+    async function startReview() {
+      const pr_id = document.getElementById("pr-select").value;
+      const btn = document.getElementById("start-btn");
+      btn.disabled = true; btn.textContent = "Starting…";
+      try {
+        const { thread_id } = await api("/api/reviews", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pr_id }) });
+        clearError();
+        renderDetail(thread_id);
+      } catch (e) {
+        showError("Failed to start review: " + e.message);
+        btn.disabled = false; btn.textContent = "Start review";
+      }
+    }
+
+    // ---- Review detail ----
+    function panel(title, bodyHtml) { return `<div class="panel"><h3>${esc(title)}</h3>${bodyHtml}</div>`; }
+    const orDash = (v, fn) => (v == null ? `<span class="muted">—</span>` : fn(v));
+
+    function findingsHtml(findings) {
+      if (!findings || !findings.length) return `<span class="muted">—</span>`;
+      const by = {};
+      findings.forEach((f) => { (by[f.specialist] ||= []).push(f); });
+      return Object.entries(by).map(([spec, fs]) => `
+        <div><strong>${esc(spec)}</strong><ul>${fs.map((f) => `
+          <li><span class="sev-${esc(f.severity)}">${esc(f.severity)}</span> · ${esc(f.policy_id)} — ${esc(f.description)}
+          ${f.needs_more_context ? ' <em class="muted">(needs context)</em>' : ""}</li>`).join("")}</ul></div>`).join("");
+    }
+
+    function renderDetailFromState(s) {
+      const view = document.getElementById("view");
+      const c = s.classification, r = s.risk, inv = s.investigation, esc_ = s.escalation, v = s.verdict;
+      view.innerHTML = `
+        <div class="toolbar">
+          <a class="link" id="back">← Reviews</a>
+          <span class="badge ${esc(s.status)}">${esc(s.status)}</span>
+          <span class="muted">${esc(s.pr_id)}</span>
+        </div>
+        ${panel("Classification", orDash(c, (c) => `<dl><dt>Type</dt><dd>${esc(c.change_type)}</dd><dt>Summary</dt><dd>${esc(c.summary)}</dd><dt>Touched areas</dt><dd>${esc((c.touched_areas || []).join(", ")) || "—"}</dd></dl>`))}
+        ${panel("Risk", orDash(r, (r) => `<div class="row"><div><dt>Score</dt><dd>${esc(r.score)}</dd></div><div><dt>Level</dt><dd>${esc(r.level)}</dd></div><div><dt>Model</dt><dd>${esc(r.model_used)}</dd></div></div><dt>Reasons</dt><dd><ul>${(r.reasons || []).map((x) => `<li>${esc(x)}</li>`).join("") || "—"}</ul></dd>`))}
+        ${panel("Findings", findingsHtml(s.specialist_findings))}
+        ${panel("Investigation", orDash(inv, (i) => `<dl><dt>Summary</dt><dd><pre>${esc(i.summary)}</pre></dd><dt>Tool calls</dt><dd>${esc(i.tool_calls_count)}</dd><dt>Cost estimate</dt><dd>$${Number(i.cost_estimate_usd || 0).toFixed(4)}</dd><dt>Files examined</dt><dd>${esc((i.files_examined || []).join(", ")) || "—"}</dd></dl>`))}
+        ${panel("Escalation", orDash(esc_, (e) => `<span class="sev-warn">${esc(e.reason)}</span> — ${esc(e.detail)}`))}
+        ${panel("Verdict", orDash(v, (v) => `<strong>${esc(v.outcome)}</strong><br/>${esc(v.rationale)}`))}
+        <div id="decision-slot"></div>`;
+      document.getElementById("back").onclick = renderList;
+    }
+
+    function renderDecisionPanel(threadId, pending) {
+      const slot = document.getElementById("decision-slot");
+      if (!slot) return;
+      if (!pending) { slot.innerHTML = ""; return; }
+      slot.innerHTML = panel("Decision", `
+        <textarea id="note" placeholder="Optional note (a request for info becomes an investigation lead)"></textarea>
+        <div class="toolbar" style="margin-top:10px">
+          <button class="primary" data-action="approve">Approve</button>
+          <button data-action="reject">Reject</button>
+          <button data-action="request_info">Request more info</button>
+        </div>`);
+      slot.querySelectorAll("[data-action]").forEach((b) => { b.onclick = () => submitDecision(threadId, b.dataset.action, slot); });
+    }
+
+    async function submitDecision(threadId, action, slot) {
+      const note = document.getElementById("note")?.value || "";
+      slot.querySelectorAll("button").forEach((b) => (b.disabled = true));
+      slot.insertAdjacentHTML("beforeend", `<div class="spinner" id="dec-spin">Submitting…</div>`);
+      try {
+        await api(`/api/reviews/${threadId}/decision`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, note }) });
+        clearError();
+      } catch (e) {
+        if (e.status === 409) { showError("Already decided — refreshing."); }
+        else { showError("Decision failed: " + e.message); slot.querySelectorAll("button").forEach((b) => (b.disabled = false)); }
+      }
+      document.getElementById("dec-spin")?.remove();
+      pollDetail(threadId); // reflect resume promptly
+    }
+
+    async function pollDetail(threadId) {
+      try {
+        const state = await api(`/api/reviews/${threadId}`);
+        renderDetailFromState(state);
+        let pending = null;
+        if (state.status === "awaiting_human") { pending = await api(`/api/reviews/${threadId}/pending`); }
+        renderDecisionPanel(threadId, pending);
+        clearError();
+        if (state.status === "done") stopPolling();
+      } catch (e) {
+        if (e.status === 404) { showError("Review not found."); stopPolling(); }
+        else { showError("Connection issue: " + e.message); }
+      }
+    }
+
+    function renderDetail(threadId) {
+      stopPolling();
+      document.getElementById("view").innerHTML = `<div class="spinner">Loading review…</div>`;
+      pollDetail(threadId);
+      pollTimer = setInterval(() => pollDetail(threadId), 2000);
+    }
+
+    document.getElementById("home-link").onclick = renderList;
+    renderList();
+  </script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+# Runtime dependencies for the auth service (all permissive licenses).
+fastapi>=0.115          # MIT
+uvicorn>=0.30           # BSD-3-Clause
+pyjwt>=2.9              # MIT

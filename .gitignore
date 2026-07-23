@@ -13,8 +13,5 @@ checkpoints.db
 checkpoints.db-*
 .chroma/
 
-# Agent session
-.agents_workspace/handoff/
-
-# Coverage
-.coverage
+# Agent workspace (local decision logs / planning)
+.agents_workspace/

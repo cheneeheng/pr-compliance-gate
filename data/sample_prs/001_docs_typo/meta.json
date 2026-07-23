@@ -1,0 +1,7 @@
+{
+  "pr_id": "001_docs_typo",
+  "title": "Fix typo in README",
+  "expected_classification": "docs",
+  "expected_route": "auto_approve",
+  "expected_outcome": "auto_approved"
+}
