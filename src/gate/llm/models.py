@@ -49,6 +49,11 @@ def specialist_model(settings: Settings | None = None) -> ChatAnthropic:
     return _chat(settings.gate_model_specialist, settings, max_tokens=2048)
 
 
+def investigator_model(settings: Settings | None = None) -> ChatAnthropic:
+    settings = settings or get_settings()
+    return _chat(settings.gate_model_investigator, settings, max_tokens=2048)
+
+
 async def structured_call(
     model: ChatAnthropic, schema: type[T], system: str, user: str
 ) -> T:

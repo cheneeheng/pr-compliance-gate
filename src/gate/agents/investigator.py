@@ -23,10 +23,11 @@ from claude_agent_sdk import (  # type: ignore[import-untyped]
     query,
     tool,
 )
+from pydantic import BaseModel, ConfigDict, Field
 
 from gate.config import Settings
 from gate.graph.state import DecisionAction, InvestigationReport, ReviewState
-from gate.llm.models import estimate_cost
+from gate.llm.models import estimate_cost, investigator_model, structured_call
 from gate.llm.prompts import INVESTIGATOR_SYSTEM
 from gate.logging import get_logger
 from gate.paths import repo_snapshot_dir
@@ -192,6 +193,34 @@ def _message_text(message: object) -> str:
     return ""
 
 
+class _InvestigationAnswer(BaseModel):
+    """Model-authored narrative for the final structured-output turn. The harness owns the
+    metrics (``tool_calls_count``, ``cost_estimate_usd``, ``files_examined``); the model writes
+    only the answer, so those are never trusted from the model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str
+    findings: list[str] = Field(default_factory=list)
+
+
+async def _summarize(
+    questions: list[str], transcript: str, files: list[str], settings: Settings
+) -> _InvestigationAnswer:
+    """Final structured-output turn: distil the loop transcript into an InvestigationReport."""
+    q_block = "\n".join(f"- {q}" for q in questions) or "- (no explicit questions)"
+    user = (
+        f"Open questions:\n{q_block}\n\n"
+        f"Files you examined: {', '.join(files) or '(none)'}\n\n"
+        f"Your investigation notes:\n{transcript or '(no notes produced)'}\n\n"
+        "Produce your final report: a concise summary answering the questions, and the concrete "
+        "findings that settle them (one string each)."
+    )
+    return await structured_call(
+        investigator_model(settings), _InvestigationAnswer, INVESTIGATOR_SYSTEM, user
+    )
+
+
 async def run_investigation(state: ReviewState, settings: Settings) -> InvestigationReport:
     """Run the bounded agent loop and return a report. Never raises into the graph."""
     root = repo_snapshot_dir(state.pr_id).resolve()
@@ -206,7 +235,7 @@ async def run_investigation(state: ReviewState, settings: Settings) -> Investiga
 
     questions = _open_questions(state)
     prompt = _build_prompt(state, questions)
-    final_text = ""
+    transcript_parts: list[str] = []
     cost = 0.0
     try:
         options = ClaudeAgentOptions(
@@ -219,7 +248,7 @@ async def run_investigation(state: ReviewState, settings: Settings) -> Investiga
         async for message in query(prompt=prompt, options=options):
             text = _message_text(message)
             if text:
-                final_text = text
+                transcript_parts.append(text)
             if type(message).__name__ == "ResultMessage":
                 cost = _extract_cost(message, settings)
     except Exception as exc:  # noqa: BLE001 — failure must land on a human, not the graph
@@ -231,9 +260,23 @@ async def run_investigation(state: ReviewState, settings: Settings) -> Investiga
             cost_estimate_usd=cost,
         )
 
+    # Final structured-output turn: the loop gathered evidence; this distils it into the report.
+    transcript = "\n".join(transcript_parts)
+    try:
+        answer = await _summarize(questions, transcript, tracker.files_examined, settings)
+    except Exception as exc:  # noqa: BLE001 — the synthesis turn must not raise into the graph
+        log.info("investigation_summarize_error", pr_id=state.pr_id, error=str(exc))
+        return InvestigationReport(
+            summary=transcript or f"investigation inconclusive: {exc}",
+            findings=[transcript] if transcript else [],
+            files_examined=tracker.files_examined,
+            tool_calls_count=tracker.tool_calls,
+            cost_estimate_usd=cost,
+        )
+
     return InvestigationReport(
-        summary=final_text or "investigation inconclusive: no answer produced",
-        findings=[final_text] if final_text else [],
+        summary=answer.summary or "investigation inconclusive: no answer produced",
+        findings=answer.findings,
         files_examined=tracker.files_examined,
         tool_calls_count=tracker.tool_calls,
         cost_estimate_usd=cost,
