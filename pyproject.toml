@@ -10,6 +10,8 @@ dependencies = [
     "langgraph-checkpoint-sqlite>=2.0",
     # Linear intake leg
     "langchain>=0.3",
+    # Direct import in intake/ingest.py — langchain no longer pulls it in transitively.
+    "langchain-text-splitters>=0.3",
     "langchain-anthropic>=0.3",
     "langchain-chroma>=0.2",
     "chromadb>=1.0",
@@ -30,6 +32,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
+    "pytest-cov>=7.1",
     "ruff>=0.6",
     "mypy>=1.11",
 ]
@@ -72,3 +75,13 @@ markers = [
     "llm: tests that make real Anthropic API calls (excluded from the default run)",
 ]
 addopts = "-m 'not llm'"
+
+[tool.coverage.run]
+source = ["gate"]
+branch = true
+
+[tool.coverage.report]
+# The default suite must cover every line and branch; the `llm` evals add nothing here.
+fail_under = 100
+show_missing = true
+exclude_also = ["if TYPE_CHECKING:", "if __name__ == .__main__.:"]
