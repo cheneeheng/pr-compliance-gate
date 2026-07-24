@@ -159,3 +159,28 @@ also means a benign info-vs-warn split now stops at a human; that is the intende
 direction. `eval_routes` adds one more `llm`-marked eval to the paid run.
 **Outcome:** Implemented; default suite 27 passed, ruff and mypy strict clean. The `llm` evals
 were not run (API spend).
+
+### Entry 9
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-07-24
+**Task:** Split the suite into unit/integration/system and reach 100% coverage of `src/gate`.
+
+**Context:** The plan names test files but not a layout or a coverage bar. Two things blocked a
+literal 100%: `intake/retrieval.py` had an unreachable empty-query fallback (`change_type` is a
+non-empty enum value, so the query is never empty), and `ingest.py`'s `__main__` block cannot run
+under pytest. Reaching the bar also required stubbing the LLM/SDK boundary everywhere.
+**Decision:** Delete the dead fallback rather than pragma around it; exclude `if __name__ ==
+"__main__":` and `if TYPE_CHECKING:` via `[tool.coverage.report] exclude_also` (they are not
+runtime paths). Put the coverage gate on the default suite only (`fail_under = 100`), with the
+`llm`-marked `system/` evals excluded — paid tests must never be load-bearing for coverage.
+Classify by what a test touches: `unit` = no I/O, no graph; `integration` = real components with
+only the LLM/SDK boundary faked; `system` = the real pipeline against the real API.
+**Impact / Risk:** A new branch in `src/gate` now fails CI until it is tested, which is the point
+but does add friction. Coverage of the SDK loop comes from a stubbed `query`, so it proves the
+harness contract (metrics, failure containment), not the SDK's real behavior — `eval_investigation`
+remains the only thing that exercises that.
+**Outcome:** 97 tests, 100% statement and branch coverage, ruff and mypy strict clean. Found and
+fixed a real bug on the way: `langchain-text-splitters` was imported by `intake/ingest.py` but
+never declared, so `uv run python -m gate.intake.ingest` failed on a clean install.

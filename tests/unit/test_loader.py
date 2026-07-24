@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from gate.errors import FixtureError
+from gate.intake import loader
 from gate.intake.loader import _parse_changed_files, _read_fixture_dir, list_prs, load_pr
 
 
@@ -46,6 +47,32 @@ def test_diff_without_headers_raises(tmp_path: Path) -> None:
         _read_fixture_dir(tmp_path)
 
 
+def test_missing_files_raise(tmp_path: Path) -> None:
+    with pytest.raises(FixtureError):
+        _read_fixture_dir(tmp_path)  # neither meta.json nor diff.patch
+
+
 def test_list_prs_returns_all_three() -> None:
     ids = {s.pr_id for s in list_prs()}
     assert {"001_docs_typo", "002_new_dependency", "003_auth_change"} <= ids
+
+
+def test_list_prs_skips_unparseable_fixtures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One broken fixture must not take the whole picker down."""
+    good = tmp_path / "001_good"
+    good.mkdir()
+    (good / "meta.json").write_text(json.dumps({"pr_id": "001_good", "title": "t"}), "utf-8")
+    (good / "diff.patch").write_text("diff --git a/x b/x\n", "utf-8")
+    (tmp_path / "002_broken").mkdir()  # no meta.json, no diff.patch
+    monkeypatch.setattr(loader, "SAMPLE_PRS_DIR", tmp_path)
+
+    assert [s.pr_id for s in list_prs()] == ["001_good"]
+
+
+def test_list_prs_is_empty_when_there_is_no_fixture_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(loader, "SAMPLE_PRS_DIR", tmp_path / "missing")
+    assert list_prs() == []

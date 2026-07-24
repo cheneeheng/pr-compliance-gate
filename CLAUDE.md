@@ -18,15 +18,29 @@ uv run python -m gate.intake.ingest       # embed the policy corpus into Chroma 
 uv run uvicorn gate.api.app:app --reload  # serve API + UI at http://127.0.0.1:8000
 
 uv run pytest                             # default suite — NO API calls (see addopts below)
+uv run pytest --cov                       # same suite + coverage; fails under 100%
 uv run pytest -m llm                      # behavioral evals hitting the real Anthropic API (needs key + ingest)
-uv run pytest tests/test_reconcile.py::test_name   # single test
+uv run pytest tests/unit/test_reconcile.py::test_name   # single test
 uv run ruff check . && uv run ruff format .
 uv run mypy src                           # strict mode
 ```
 
 `pytest` defaults to `-m 'not llm'` (`pyproject.toml addopts`), so the plain command never spends
 money or needs a key — the `_test_env` fixture injects a dummy `ANTHROPIC_API_KEY` and points
-storage at tmp paths. The `llm`-marked files (`tests/eval_*.py`) are opt-in evals.
+storage at tmp paths.
+
+Tests are split by what they touch, `conftest.py` at the root applying to all three:
+
+- `tests/unit/` — pure functions, no I/O and no graph (reducers, reconcile's rule ladder, the
+  investigator's sandbox and tool closures, the fixture loader, model factories).
+- `tests/integration/` — real components wired together with only the LLM/SDK boundary stubbed
+  (graph nodes, the API against a fake graph, the investigator harness, ingestion/retrieval).
+- `tests/system/` — the `llm`-marked `eval_*.py` files: the real pipeline against the real API.
+
+The default (`unit` + `integration`) run must keep **100% statement and branch coverage** of
+`src/gate` — `[tool.coverage.report] fail_under = 100` enforces it, so a new branch needs a new
+test. The `system/` evals are excluded from that measurement on purpose; they cost money and
+must never be load-bearing for coverage.
 
 ## Architecture
 

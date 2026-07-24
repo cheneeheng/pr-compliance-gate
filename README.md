@@ -82,9 +82,13 @@ Anthropic API before a real run.
 ## Tests
 
 ```bash
-uv run pytest            # default suite (no API calls)
-uv run pytest -m llm     # behavioral evals that hit the real Anthropic API (needs a key + ingest)
+uv run pytest            # tests/unit + tests/integration — no API calls
+uv run pytest --cov      # same, with coverage; the gate is 100% of src/gate
+uv run pytest -m llm     # tests/system: behavioral evals against the real API (needs a key + ingest)
 ```
+
+`unit` is pure logic, `integration` wires real components with the LLM/SDK boundary stubbed, and
+`system` holds the paid evals — which are deliberately excluded from the coverage gate.
 
 ## Out of MVP scope
 
