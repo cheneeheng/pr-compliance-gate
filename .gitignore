@@ -12,6 +12,3 @@ __pycache__/
 checkpoints.db
 checkpoints.db-*
 .chroma/
-
-# Agent workspace (local decision logs / planning)
-.agents_workspace/
