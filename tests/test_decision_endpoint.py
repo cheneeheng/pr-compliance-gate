@@ -7,6 +7,8 @@ resumed ``Command`` can be asserted deterministically without awaiting the backg
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -48,12 +50,12 @@ class _FakeGraph:
         return _noop()
 
 
-def _client_with(graph: _FakeGraph) -> TestClient:
+@contextmanager
+def _client_with(graph: _FakeGraph) -> Iterator[TestClient]:
     app = create_app()
-    client = TestClient(app)
-    client.__enter__()  # run lifespan (sets a real graph), then override it
-    app.state.graph = graph
-    return client
+    with TestClient(app) as client:  # run lifespan once (sets a real graph), then override it
+        app.state.graph = graph
+        yield client
 
 
 def test_decision_409_when_not_interrupted() -> None:
