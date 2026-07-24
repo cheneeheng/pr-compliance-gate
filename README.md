@@ -41,7 +41,9 @@ single-user local demo).
 
 ## Demo script
 
-Each beat names the failure-mode or cost feature it demonstrates. This arc is the artifact.
+Each beat names the failure-mode or cost feature it demonstrates. This arc is the artifact. Run
+it headless (no UI, scripted human decisions, narrated stage-by-stage) with
+`uv run python examples/demo.py` — each beat below maps to one section of its output.
 
 1. **`001_docs_typo` — auto-approved, no Sonnet spend.** A README typo classifies as `docs`,
    scores below the risk threshold, and exits at `verdict(auto_approved)` straight from the
