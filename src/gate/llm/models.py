@@ -8,15 +8,11 @@ and no node ever constructs raw messages itself.
 
 from __future__ import annotations
 
-from typing import TypeVar
-
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
 from gate.config import Settings, get_settings
-
-T = TypeVar("T", bound=BaseModel)
 
 # Static per-model price table, USD per 1M tokens (input, output). An ESTIMATE for the demo's
 # cost display — not billing truth. Keyed by the env-configured model id; unknown ids fall back
@@ -30,8 +26,8 @@ _FALLBACK_PRICE: tuple[float, float] = (3.00, 15.00)
 
 def _chat(model_id: str, settings: Settings, *, max_tokens: int) -> ChatAnthropic:
     return ChatAnthropic(
-        model=model_id,  # type: ignore[call-arg]  # langchain-anthropic aliases model->model_name
-        api_key=settings.anthropic_api_key or None,  # type: ignore[arg-type]
+        model=model_id,  # langchain-anthropic aliases model->model_name
+        api_key=settings.anthropic_api_key or None,
         temperature=0.0,
         max_tokens=max_tokens,
         timeout=None,
@@ -54,7 +50,7 @@ def investigator_model(settings: Settings | None = None) -> ChatAnthropic:
     return _chat(settings.gate_model_investigator, settings, max_tokens=2048)
 
 
-async def structured_call(
+async def structured_call[T: BaseModel](
     model: ChatAnthropic, schema: type[T], system: str, user: str
 ) -> T:
     """Invoke ``model`` for a single structured-output turn. Owns message construction."""

@@ -11,13 +11,13 @@ from uuid import uuid4
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import FileResponse
 from langgraph.types import Command
+from pydantic import BaseModel, ConfigDict
 
 from gate.errors import NoPendingDecisionError, ReviewNotFoundError
 from gate.graph.state import DecisionAction, initial_state
 from gate.intake.loader import list_prs, load_pr
 from gate.logging import get_logger
 from gate.paths import STATIC_DIR
-from pydantic import BaseModel, ConfigDict
 
 log = get_logger(__name__)
 router = APIRouter()

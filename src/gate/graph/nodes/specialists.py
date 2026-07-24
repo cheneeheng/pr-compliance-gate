@@ -60,7 +60,7 @@ async def _run_specialist(state: ReviewState, specialty: Specialty) -> dict[str,
             ),
             timeout=settings.gate_specialist_timeout_s,
         )
-    except (TimeoutError, asyncio.TimeoutError):
+    except TimeoutError:
         log.info("specialist_timeout", pr_id=state.pr_id, specialist=specialty.value)
         return {
             "escalation": EscalationRecord(

@@ -17,8 +17,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from claude_agent_sdk import (  # type: ignore[import-untyped]
+from claude_agent_sdk import (
     ClaudeAgentOptions,
+    McpSdkServerConfig,
     create_sdk_mcp_server,
     query,
     tool,
@@ -78,7 +79,7 @@ def resolve_in_sandbox(root: Path, path_str: str) -> Path | None:
     return candidate if candidate.is_relative_to(root) else None
 
 
-def _make_server(root: Path, tracker: _Tracker) -> object:
+def _make_server(root: Path, tracker: _Tracker) -> McpSdkServerConfig:
     """Build the in-process MCP server exposing the three sandboxed tools."""
 
     def _resolve(path_str: str) -> Path | None:

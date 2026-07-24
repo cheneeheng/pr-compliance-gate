@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import logging
 from contextvars import ContextVar
+from typing import cast
 
 import structlog
+from structlog.typing import EventDict, WrappedLogger
 
 _correlation_id: ContextVar[str | None] = ContextVar("correlation_id", default=None)
 
@@ -20,8 +22,8 @@ def set_correlation_id(value: str) -> None:
 
 
 def _inject_correlation_id(
-    _logger: object, _method: str, event_dict: dict[str, object]
-) -> dict[str, object]:
+    _logger: WrappedLogger, _method: str, event_dict: EventDict
+) -> EventDict:
     cid = _correlation_id.get()
     if cid is not None:
         event_dict["correlation_id"] = cid
@@ -44,4 +46,4 @@ def configure_logging(level: int = logging.INFO) -> None:
 
 
 def get_logger(name: str) -> structlog.stdlib.BoundLogger:
-    return structlog.get_logger(name)
+    return cast("structlog.stdlib.BoundLogger", structlog.get_logger(name))

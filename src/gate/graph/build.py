@@ -59,9 +59,9 @@ def _route_after_gate(state: ReviewState) -> str:
     return "verdict"
 
 
-def build_graph_builder() -> StateGraph:
+def build_graph_builder() -> StateGraph[ReviewState]:
     """Construct the uncompiled graph topology (checkpointer added at compile time)."""
-    builder: StateGraph = StateGraph(ReviewState)
+    builder: StateGraph[ReviewState] = StateGraph(ReviewState)
 
     builder.add_node("intake", intake)
     builder.add_node("classify", classify)
@@ -105,5 +105,5 @@ def build_graph_builder() -> StateGraph:
     return builder
 
 
-def compile_graph(checkpointer: AsyncSqliteSaver) -> CompiledStateGraph:
+def compile_graph(checkpointer: AsyncSqliteSaver) -> CompiledStateGraph[ReviewState]:
     return build_graph_builder().compile(checkpointer=checkpointer)

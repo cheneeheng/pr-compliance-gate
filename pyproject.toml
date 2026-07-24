@@ -62,6 +62,7 @@ module = [
     "claude_agent_sdk.*",
     "langgraph.*",
     "langchain_anthropic.*",
+    "langchain_text_splitters.*",
 ]
 ignore_missing_imports = true
 
