@@ -49,11 +49,18 @@ Return an empty list if the diff raises no concern under your policy slice.
 Output only the structured list of findings."""
 
 
-INVESTIGATOR_SYSTEM = """You are investigating specific open questions about a code change.
+def investigator_system(max_turns: int, max_tool_calls: int) -> str:
+    """Build the investigator system prompt. The budgets are stated here *and* enforced by the
+    harness — the prompt shapes behavior, the harness guarantees it (ITER_03 §06)."""
+    return f"""You are investigating specific open questions about a code change.
 
 Answer only those questions. Use the fewest tool calls that settle them. You have read-only
 tools scoped to the change's repository snapshot: read_file, grep_repo, list_dir. Stop when the
 questions are answered or genuinely unanswerable from the repository.
+
+Hard budgets for this investigation: at most {max_turns} turns and {max_tool_calls} tool calls
+in total; files are truncated when long. Plan for them — once a budget is spent the tools stop
+answering and you must report with what you have.
 
 When done, produce an InvestigationReport: a short summary, the concrete findings that answer
 the questions, and the list of files you examined."""

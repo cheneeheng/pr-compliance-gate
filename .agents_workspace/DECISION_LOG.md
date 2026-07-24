@@ -108,3 +108,54 @@ Reconcile only writes escalation when none exists yet, so first-wins is correct 
 **Impact / Risk:** Prevents a latent crash on the double-timeout path. No behavioral change on
 the single-write paths.
 **Outcome:** Implemented in `graph/state.py`.
+
+### Entry 7
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-07-24
+**Task:** Plan-compliance audit of the v1 family (SKELETON + ITER_01..04) — where to place the
+missing ITER_04 §04 test and whether to add the missing ITER_02 §06 `eval_routes.py`.
+
+**Context:** ITER_04 §04 specifies three decision-endpoint tests "(mocked graph)"; the third —
+`request_info` at an exhausted loop budget re-interrupts with `max_cycles` — was absent. Written
+against the existing `_FakeGraph` it would assert nothing real (the fake never routes). ITER_02
+§06 specifies `tests/eval_routes.py`; the repo instead folds route coverage into `eval_demo.py`.
+**Decision:** (a) Cover the ITER_04 case in `test_decision_endpoint.py` but against the real
+routing functions (`_route_after_gate` -> `investigate` -> `reconcile`) with `run_investigation`
+monkeypatched, so the assertion is about the actual resume path, not the fake. (b) Do not add
+`eval_routes.py`: `eval_demo.py` runs the same three fixtures end-to-end and asserts terminal
+outcomes, which imply the routes; the substitution is already documented in its module docstring.
+`expected_route` in each `meta.json` is consequently unread — kept as fixture documentation.
+**Impact / Risk:** (a) The test is no longer purely endpoint-level, so an endpoint regression that
+bypasses those routing functions would not be caught by it (the 409/404/Command tests still cover
+the endpoint itself). (b) One planned eval filename does not exist; route regressions surface as
+outcome mismatches instead.
+**Outcome:** (a) implemented. (b) **superseded by entry 8** — the user asked for the remaining
+open items to be closed, so `eval_routes.py` was written after all.
+
+### Entry 8
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-07-24
+**Task:** Close the two items left open by the v1 plan-compliance audit — reconcile's shadowed
+rule 5, and the missing `tests/eval_routes.py`.
+
+**Context:** ITER_02 §04 words rule 5 (disagreement) as severities spanning `info/warn` vs
+`block` between specialists on one policy, ordered after rule 2 (any block -> human_gate). Those
+two statements are inconsistent: rule 2 escalates every finding set containing a block, so the
+rule-5 condition can never be reached, making the branch dead and `EscalationReason.disagreement`
+unusable. Either the ordering or the condition has to give.
+**Decision:** Keep the plan's ordering (it is stated as deliberate) and widen the condition to
+what survives rule 2: two specialists citing the same `policy_id` at *different* severities.
+The plan docs are left untouched as historical artifacts; this entry records the divergence.
+Also wrote the planned `eval_routes.py` (reversing entry 7b), which asserts each fixture's
+`expected_route` at its first resting point — the complement of `eval_demo`'s terminal outcomes.
+**Impact / Risk:** More reviews can now escalate as `disagreement`. In practice near-zero change:
+the specialists own disjoint policy-id prefixes (`SEC-*`/`DATA-*` vs `LIC-*`), so both citing one
+policy is currently unreachable — the rule is there for when the prefix split loosens. Widening
+also means a benign info-vs-warn split now stops at a human; that is the intended fail-safe
+direction. `eval_routes` adds one more `llm`-marked eval to the paid run.
+**Outcome:** Implemented; default suite 27 passed, ruff and mypy strict clean. The `llm` evals
+were not run (API spend).

@@ -34,10 +34,13 @@ ROUTE_VERDICT = "verdict"
 
 
 def _has_disagreement(findings: list[Finding]) -> tuple[bool, str]:
-    """True if two specialists rate the same policy across the info/warn vs block divide.
+    """True if two specialists rate the same policy at different severities.
 
-    Reachable only if no lone block finding exists (rule 2 catches those first); this catches a
-    contested call where the severities genuinely span the block boundary between specialists.
+    The plan words this as severities spanning ``info/warn`` vs ``block``, but rule 2 already
+    escalated every set containing a block, so that reading is unreachable — the rule would be
+    dead code and ``EscalationReason.disagreement`` unusable. Ordering it after rule 2 "by
+    design" only makes sense if it catches what survives rule 2, so the divide checked here is
+    any severity split between specialists on one policy (see DECISION_LOG entry 8).
     """
     by_policy: dict[str, set[tuple[Specialty, Severity]]] = {}
     for f in findings:
@@ -45,10 +48,7 @@ def _has_disagreement(findings: list[Finding]) -> tuple[bool, str]:
     for policy_id, pairs in by_policy.items():
         specialists = {s for s, _ in pairs}
         severities = {sev for _, sev in pairs}
-        spans_block = Severity.block in severities and bool(
-            severities & {Severity.info, Severity.warn}
-        )
-        if len(specialists) > 1 and spans_block:
+        if len(specialists) > 1 and len(severities) > 1:
             return True, policy_id
     return False, ""
 

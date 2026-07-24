@@ -20,6 +20,7 @@ from pathlib import Path
 from claude_agent_sdk import (
     ClaudeAgentOptions,
     McpSdkServerConfig,
+    SdkMcpTool,
     create_sdk_mcp_server,
     query,
     tool,
@@ -29,7 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from gate.config import Settings
 from gate.graph.state import DecisionAction, InvestigationReport, ReviewState
 from gate.llm.models import estimate_cost, investigator_model, structured_call
-from gate.llm.prompts import INVESTIGATOR_SYSTEM
+from gate.llm.prompts import investigator_system
 from gate.logging import get_logger
 from gate.paths import repo_snapshot_dir
 
@@ -53,8 +54,10 @@ class _Tracker:
     tool_calls: int = 0
     files_examined: list[str] = field(default_factory=list)
 
-    def over_budget(self) -> bool:
-        return self.tool_calls > self.max_tool_calls
+    def budget_exhausted(self) -> bool:
+        """True once the cap is spent. Checked *before* incrementing, so a refused call is not
+        counted and ``tool_calls`` can never exceed ``max_tool_calls`` (ITER_03 §04 budget)."""
+        return self.tool_calls >= self.max_tool_calls
 
 
 def _tool_text(text: str, *, is_error: bool = False) -> dict[str, object]:
@@ -79,17 +82,18 @@ def resolve_in_sandbox(root: Path, path_str: str) -> Path | None:
     return candidate if candidate.is_relative_to(root) else None
 
 
-def _make_server(root: Path, tracker: _Tracker) -> McpSdkServerConfig:
-    """Build the in-process MCP server exposing the three sandboxed tools."""
+def _build_tools(root: Path, tracker: _Tracker) -> list[SdkMcpTool[object]]:
+    """Build the three sandboxed tool closures over ``root``. Separate from server construction
+    so the sandbox and budget behavior can be unit-tested without running the SDK loop."""
 
     def _resolve(path_str: str) -> Path | None:
         return resolve_in_sandbox(root, path_str)
 
     @tool("read_file", "Read a UTF-8 text file inside the change's repo snapshot.", {"path": str})
     async def read_file(args: dict[str, object]) -> dict[str, object]:
-        tracker.tool_calls += 1
-        if tracker.over_budget():
+        if tracker.budget_exhausted():
             return _tool_text("tool-call budget exhausted; stop and report.", is_error=True)
+        tracker.tool_calls += 1
         path = _resolve(str(args.get("path", "")))
         if path is None or not path.is_file():
             return _tool_text(f"no such file in snapshot: {args.get('path')!r}", is_error=True)
@@ -102,9 +106,9 @@ def _make_server(root: Path, tracker: _Tracker) -> McpSdkServerConfig:
     @tool("grep_repo", "Search the repo snapshot for a substring/regex-free pattern.",
           {"pattern": str})
     async def grep_repo(args: dict[str, object]) -> dict[str, object]:
-        tracker.tool_calls += 1
-        if tracker.over_budget():
+        if tracker.budget_exhausted():
             return _tool_text("tool-call budget exhausted; stop and report.", is_error=True)
+        tracker.tool_calls += 1
         pattern = str(args.get("pattern", ""))
         if not pattern:
             return _tool_text("empty pattern", is_error=True)
@@ -128,9 +132,9 @@ def _make_server(root: Path, tracker: _Tracker) -> McpSdkServerConfig:
 
     @tool("list_dir", "List entries of a directory inside the repo snapshot.", {"path": str})
     async def list_dir(args: dict[str, object]) -> dict[str, object]:
-        tracker.tool_calls += 1
-        if tracker.over_budget():
+        if tracker.budget_exhausted():
             return _tool_text("tool-call budget exhausted; stop and report.", is_error=True)
+        tracker.tool_calls += 1
         path = _resolve(str(args.get("path", ".")))
         if path is None or not path.is_dir():
             return _tool_text(f"no such directory in snapshot: {args.get('path')!r}",
@@ -140,8 +144,19 @@ def _make_server(root: Path, tracker: _Tracker) -> McpSdkServerConfig:
         )
         return _tool_text("\n".join(entries) if entries else "(empty)")
 
+    return [read_file, grep_repo, list_dir]
+
+
+def _make_server(root: Path, tracker: _Tracker) -> McpSdkServerConfig:
+    """Build the in-process MCP server exposing the three sandboxed tools."""
     return create_sdk_mcp_server(
-        name=_SERVER_NAME, version="1.0.0", tools=[read_file, grep_repo, list_dir]
+        name=_SERVER_NAME, version="1.0.0", tools=_build_tools(root, tracker)
+    )
+
+
+def _system_prompt(settings: Settings) -> str:
+    return investigator_system(
+        settings.gate_investigator_max_turns, settings.gate_investigator_max_tool_calls
     )
 
 
@@ -218,7 +233,7 @@ async def _summarize(
         "findings that settle them (one string each)."
     )
     return await structured_call(
-        investigator_model(settings), _InvestigationAnswer, INVESTIGATOR_SYSTEM, user
+        investigator_model(settings), _InvestigationAnswer, _system_prompt(settings), user
     )
 
 
@@ -241,7 +256,7 @@ async def run_investigation(state: ReviewState, settings: Settings) -> Investiga
     try:
         options = ClaudeAgentOptions(
             model=settings.gate_model_investigator,
-            system_prompt=INVESTIGATOR_SYSTEM,
+            system_prompt=_system_prompt(settings),
             mcp_servers={_SERVER_NAME: _make_server(root, tracker)},
             allowed_tools=_ALLOWED_TOOLS,
             max_turns=settings.gate_investigator_max_turns,
