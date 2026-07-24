@@ -2,13 +2,14 @@
 
 Marked ``llm`` — spins the real graph, hits the real Anthropic API, and needs the policy corpus
 ingested first (``uv run python -m gate.intake.ingest``). Asserts each fixture's terminal
-``verdict.outcome`` matches ``expected_outcome`` in its ``meta.json``. This subsumes the route
-assertions of ``eval_routes`` (each terminal route is implied by the outcome it produces).
+``verdict.outcome`` matches ``expected_outcome`` in its ``meta.json``. ``eval_routes`` covers the
+complementary half: the route each fixture takes to its first resting point.
 """
 
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -22,11 +23,22 @@ _POLL_TIMEOUT_S = 180.0
 _POLL_INTERVAL_S = 2.0
 
 
-def _wait(client: TestClient, tid: str, statuses: set[str]) -> dict[str, Any]:
+def _wait(
+    client: TestClient,
+    tid: str,
+    statuses: set[str],
+    also: Callable[[dict[str, Any]], bool] = lambda _s: True,
+) -> dict[str, Any]:
+    """Poll until the review reaches one of ``statuses`` and satisfies ``also``.
+
+    ``also`` guards against reading the *pre-resume* checkpoint: the decision endpoint spawns the
+    resume as a background task, so a poll issued immediately after it returns can still observe
+    the interrupt that was just answered.
+    """
     deadline = time.time() + _POLL_TIMEOUT_S
     while time.time() < deadline:
         state = client.get(f"/api/reviews/{tid}").json()
-        if state["status"] in statuses:
+        if state["status"] in statuses and also(state):
             return state
         time.sleep(_POLL_INTERVAL_S)
     raise AssertionError(f"thread {tid} never reached {statuses}")
@@ -60,10 +72,11 @@ def test_002_reject() -> None:
 def test_003_request_info_then_approve() -> None:
     with TestClient(create_app()) as client:
         tid = _start(client, "003_auth_change")
-        _wait(client, tid, {"awaiting_human"})
+        gated = _wait(client, tid, {"awaiting_human"})
+        cycles = gated.get("loop_count", 0)
         _decide(client, tid, "request_info", "confirm the signature check is enforced")
-        # Re-investigation runs, then the gate re-interrupts.
-        _wait(client, tid, {"awaiting_human"})
+        # Re-investigation runs (spending a loop cycle), then the gate re-interrupts.
+        _wait(client, tid, {"awaiting_human"}, lambda s: s.get("loop_count", 0) > cycles)
         _decide(client, tid, "approve")
         state = _wait(client, tid, {"done"})
         assert state["verdict"]["outcome"] == "approved"

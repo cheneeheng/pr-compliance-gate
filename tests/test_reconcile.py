@@ -1,9 +1,7 @@
 """reconcile routing-brain unit tests — all six routes (ITER_02 §04).
 
-Rule 5 (disagreement) is shadowed by rule 2 (any block) in the full reconcile — a contested call
-necessarily contains a block, which rule 2 catches first. That is the plan's explicit ordering
-("ordered after rule 2 by design"), so rule 5 is exercised here against the `_has_disagreement`
-predicate directly rather than through the shadowed public path.
+Rule 5 (disagreement) fires on what survives rule 2: a severity split between specialists on one
+policy, with no block anywhere (a block would have escalated at rule 2). See DECISION_LOG entry 8.
 """
 
 from __future__ import annotations
@@ -63,23 +61,34 @@ async def test_rule4_needs_context_budget_exhausted_escalates() -> None:
     assert update["escalation"].reason == "max_cycles"  # type: ignore[union-attr]
 
 
+async def test_rule5_contested_policy_escalates_disagreement() -> None:
+    state = _state(
+        specialist_findings=[
+            _finding(specialist=Specialty.security, severity=Severity.warn, policy_id="SEC-01"),
+            _finding(specialist=Specialty.license, severity=Severity.info, policy_id="SEC-01"),
+        ]
+    )
+    update = await reconcile(state)
+    assert update["route"] == ROUTE_HUMAN_GATE
+    assert update["escalation"].reason == "disagreement"  # type: ignore[union-attr]
+
+
 async def test_rule6_clean_routes_verdict() -> None:
     state = _state(specialist_findings=[_finding(severity=Severity.info)])
     assert (await reconcile(state))["route"] == ROUTE_VERDICT
 
 
-def test_disagreement_predicate_detects_contested_policy() -> None:
-    findings = [
-        _finding(specialist=Specialty.security, severity=Severity.block, policy_id="SEC-01"),
-        _finding(specialist=Specialty.license, severity=Severity.info, policy_id="SEC-01"),
-    ]
-    detected, policy_id = _has_disagreement(findings)
-    assert detected and policy_id == "SEC-01"
-
-
 def test_disagreement_predicate_ignores_single_specialist() -> None:
     findings = [
-        _finding(specialist=Specialty.security, severity=Severity.block, policy_id="SEC-01"),
+        _finding(specialist=Specialty.security, severity=Severity.warn, policy_id="SEC-01"),
         _finding(specialist=Specialty.security, severity=Severity.info, policy_id="SEC-01"),
+    ]
+    assert _has_disagreement(findings) == (False, "")
+
+
+def test_disagreement_predicate_ignores_agreeing_specialists() -> None:
+    findings = [
+        _finding(specialist=Specialty.security, severity=Severity.warn, policy_id="SEC-01"),
+        _finding(specialist=Specialty.license, severity=Severity.warn, policy_id="SEC-01"),
     ]
     assert _has_disagreement(findings) == (False, "")

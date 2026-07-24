@@ -20,4 +20,4 @@ _EXPECTED = {
 
 def test_graph_has_expected_nodes() -> None:
     builder = build_graph_builder()
-    assert _EXPECTED <= set(builder.nodes)
+    assert set(builder.nodes) >= _EXPECTED
