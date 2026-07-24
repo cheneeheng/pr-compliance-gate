@@ -12,3 +12,6 @@ __pycache__/
 checkpoints.db
 checkpoints.db-*
 .chroma/
+
+# Agent session
+.agents_workspace/handoff/
