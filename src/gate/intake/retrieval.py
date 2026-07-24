@@ -16,10 +16,8 @@ _TOP_K = 6
 def retrieve(classification: Classification, settings: Settings | None = None) -> list[PolicyChunk]:
     """Return the top-k policy chunks most relevant to the classified change."""
     settings = settings or get_settings()
-    query = " ".join([classification.change_type.value, *classification.touched_areas]).strip()
-    if not query:
-        query = classification.summary
-
+    # change_type is a non-empty enum value, so the query is never empty.
+    query = " ".join([classification.change_type.value, *classification.touched_areas])
     store = get_vectorstore(settings)
     hits = store.similarity_search_with_score(query, k=_TOP_K)
     chunks: list[PolicyChunk] = []
