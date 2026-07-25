@@ -90,7 +90,16 @@ node so a checkpoint resume can't double-count.
 ### The investigator is an Agent SDK loop nested inside one graph node
 
 `agents/investigator.py`: LangGraph sees a single `investigate` node; the Claude Agent SDK owns
-the inner tool loop. Key invariants:
+the inner tool loop.
+
+`agents/` means "owns its own control flow", not "does LLM work" — so it holds the investigator
+and nothing else. The specialists stay in `graph/nodes/` because a specialist is one stateless
+`structured_call` (no tools, no loop), structurally identical to `classify` and `risk_score`. The
+6-line `graph/nodes/investigate.py` is the seam that keeps every node uniformly "state in, partial
+state out, no control flow of its own", and confines the `claude-agent-sdk` import — the one
+dependency whose surface moves — to a single module. Do not merge the harness into the node.
+
+Key invariants:
 - Three **read-only sandboxed tools** (`read_file`, `grep_repo`, `list_dir`) over the PR's repo
   snapshot (`data/sample_prs/<pr_id>/repo/`). `resolve_in_sandbox` blocks `..` traversal and
   absolute-path escapes and is pure/module-level so it's unit-testable without the SDK.
