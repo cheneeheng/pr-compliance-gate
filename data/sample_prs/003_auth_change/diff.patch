@@ -1,0 +1,20 @@
+diff --git a/src/acme/auth.py b/src/acme/auth.py
+index 3c4d5e6..7a8b9c0 100644
+--- a/src/acme/auth.py
++++ b/src/acme/auth.py
+@@ -18,10 +18,13 @@ def verify_session(token: str) -> Session | None:
+-    payload = _decode(token)
+-    if payload is None:
+-        return None
+-    if payload["exp"] < _now():
+-        return None
+-    return Session(user_id=payload["sub"], scopes=payload["scopes"])
++    payload = _decode(token)
++    if payload is None:
++        return None
++    # Reject expired tokens with a small clock-skew allowance.
++    if payload["exp"] + CLOCK_SKEW_S < _now():
++        return None
++    if not _signature_valid(token):
++        return None
++    return Session(user_id=payload["sub"], scopes=payload["scopes"])

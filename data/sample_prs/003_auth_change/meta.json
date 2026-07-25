@@ -1,0 +1,8 @@
+{
+  "pr_id": "003_auth_change",
+  "title": "Refactor session validation in auth middleware",
+  "expected_classification": "code",
+  "expected_route": "human_gate",
+  "expected_investigation_hits": ["auth"],
+  "expected_outcome": "approved"
+}

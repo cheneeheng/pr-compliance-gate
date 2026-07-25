@@ -1,0 +1,16 @@
+# Logging configuration for the auth service.
+# Note: no request bodies or token values are logged — only the correlation id and outcome,
+# so the auth change does not introduce a DATA-03 (PII in logs) concern.
+version: 1
+formatters:
+  json:
+    format: "%(asctime)s %(levelname)s %(name)s %(message)s"
+handlers:
+  stdout:
+    class: logging.StreamHandler
+    formatter: json
+loggers:
+  acme.auth:
+    level: INFO
+    handlers: [stdout]
+    # Fields emitted: event, correlation_id, user_id_hash, outcome. Never: token, password, email.

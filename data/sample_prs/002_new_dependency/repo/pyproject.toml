@@ -1,0 +1,13 @@
+[project]
+name = "acme-order-service"
+version = "1.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "report-forge>=2.0",  # PDF export; distributed under GPL-3.0
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
