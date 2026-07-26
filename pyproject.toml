@@ -1,9 +1,20 @@
 [project]
 name = "pr-compliance-gate"
 version = "0.1.0"
-description = "Agentic pipeline that reviews pull requests against organizational policy before merge."
+description = "A LangGraph + Claude Agent SDK pipeline that reviews pull requests against security, licensing, and data-handling policy before merge — cost-gated, human-in-the-loop."
 readme = "README.md"
 requires-python = ">=3.12"
+keywords = [
+    "langgraph",
+    "claude-agent-sdk",
+    "anthropic",
+    "agent-orchestration",
+    "human-in-the-loop",
+    "code-review-automation",
+    "policy-compliance",
+    "rag",
+    "fastapi",
+]
 dependencies = [
     # Orchestration
     "langgraph>=0.2",

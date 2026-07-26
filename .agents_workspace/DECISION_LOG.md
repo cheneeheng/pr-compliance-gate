@@ -184,3 +184,27 @@ remains the only thing that exercises that.
 **Outcome:** 97 tests, 100% statement and branch coverage, ruff and mypy strict clean. Found and
 fixed a real bug on the way: `langchain-text-splitters` was imported by `intake/ingest.py` but
 never declared, so `uv run python -m gate.intake.ingest` failed on a clean install.
+
+### Entry 10
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-07-26
+**Task:** Make the repo's public text discoverable (README first screen, package metadata, GitHub repo description and topics).
+
+**Context:** Three surfaces carried three different pitches: an empty GitHub repo description, a
+generic `project.description` ("Agentic pipeline that reviews pull requests against organizational
+policy before merge"), and a README opening paragraph that named neither LangGraph nor the Claude
+Agent SDK — the two terms someone would actually search. Packaging is explicitly out of MVP scope,
+which makes it ambiguous how much PyPI metadata is warranted.
+**Decision:** Wrote one canonical one-liner and used it verbatim on all three surfaces. Added
+`project.keywords`, but deliberately no trove classifiers — classifiers only pay off on a published
+package, and this one is not published. Folded the `## Setup` / `## Run` sections into the first
+screen so the install command appears above the fold instead of duplicating it.
+**Impact / Risk:** Renaming/removing the `Setup` and `Run` headings breaks any external anchor
+links to `#setup` / `#run`; no in-repo links pointed at them.
+**Outcome:** README and `pyproject.toml` updated. The `gh repo edit` call for the description and
+topics failed with HTTP 403 (the PAT lacks repo-admin scope); the user applied that metadata by
+hand. Branch named `chore/prep-pypi-release` — the user reframed this work as the first step
+toward an actual PyPI release, which reopens the classifiers decision above whenever that release
+is cut.

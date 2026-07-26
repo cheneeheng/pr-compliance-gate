@@ -1,13 +1,28 @@
 # PR Compliance Gate
 
-An agentic pipeline that reviews pull requests against organizational policy (security,
-licensing, data-handling) before merge. A cheap classifier and risk scorer gate the pipeline;
-medium/high-risk changes fan out to specialist agents, which can request deeper autonomous
-investigation; high-risk or contested reviews stop at a human approval gate. Every step is
-checkpointed to SQLite and resumable.
+A LangGraph + Claude Agent SDK pipeline that reviews pull requests against security, licensing,
+and data-handling policy before merge — cost-gated, human-in-the-loop.
 
-This is a portfolio artifact demonstrating production-grade agent orchestration — failure modes,
-cost gating, and human-in-the-loop — not a hosted product.
+A Haiku classifier and risk scorer gate the pipeline: sub-threshold changes are auto-approved
+without ever invoking a Sonnet specialist. Everything above the threshold fans out to parallel
+security and license specialists, which can request a deeper autonomous investigation — an Agent
+SDK sub-agent with three read-only sandboxed tools and hard turn/tool/byte budgets. Blocking or
+contested reviews stop at a human approval gate. Every step is checkpointed to SQLite, so a
+review survives a process restart and resumes where it stopped.
+
+**Scope:** a portfolio artifact demonstrating production-grade agent orchestration — cost gating,
+failure modes, human-in-the-loop — not a hosted product. It reads pull requests from local
+fixtures rather than the live GitHub API, is single-user with no auth, and is not published to
+PyPI. Python 3.12+.
+
+```bash
+uv sync                                   # install dependencies
+cp .env.example .env                      # then set ANTHROPIC_API_KEY
+uv run python -m gate.intake.ingest       # embed the policy corpus into Chroma (one-time)
+uv run uvicorn gate.api.app:app --reload  # serve the API + UI on http://127.0.0.1:8000
+```
+
+The FastAPI app serves the UI same-origin — no CORS, no auth: a single-user local demo.
 
 ## Pipeline
 
@@ -21,23 +36,6 @@ intake -> classify (Haiku) -> retrieve_policy -> risk_score (Haiku)
             clean                         -> verdict
   human_gate: approve|reject -> verdict ; request_info -> investigate
 ```
-
-## Setup
-
-```bash
-uv sync                      # install dependencies
-cp .env.example .env         # then set ANTHROPIC_API_KEY
-uv run python -m gate.intake.ingest   # embed the policy corpus into Chroma
-```
-
-## Run
-
-```bash
-uv run uvicorn gate.api.app:app --reload
-```
-
-Open http://127.0.0.1:8000 — the FastAPI app serves the UI (same origin, no CORS, no auth: a
-single-user local demo).
 
 ## Demo script
 
