@@ -208,3 +208,54 @@ topics failed with HTTP 403 (the PAT lacks repo-admin scope); the user applied t
 hand. Branch named `chore/prep-pypi-release` — the user reframed this work as the first step
 toward an actual PyPI release, which reopens the classifiers decision above whenever that release
 is cut.
+
+### Entry 11
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-07-26
+**Task:** Make the repo actually publishable to PyPI (metadata, license, installed-package correctness, workflows).
+
+**Context:** Entry 10 left packaging half-declared: keywords but no classifiers, no license of any
+kind, and README text asserting the project is not published. Four things were genuinely
+unresolved. (1) Licensing — a public, hard-to-reverse legal choice, so this one was asked rather
+than assumed; the user chose Apache-2.0. (2) `gate.paths` anchored every asset directory at
+`Path(__file__).parents[2]`, which is the repo root in a checkout and the directory above
+`site-packages` in a wheel — a `pip install` of this package could not find `data/` or `static/`,
+so ingest, the fixtures, and the UI would all fail. (3) Whether to add a console-script entry
+point. (4) Whether CI should enforce `ruff format`.
+**Decision:** (1) Apache-2.0 via PEP 639 (`license = "Apache-2.0"` + `license-files`), which
+requires `hatchling>=1.27`, and no `License ::` trove classifier — PEP 639 supersedes it.
+(2) Bundle `data/` and `static/` into the wheel via hatch `force-include` to `gate/_bundled/`, and
+have `paths.py` prefer that copy, falling back to the repo root; `REPO_ROOT` renamed `ASSET_ROOT`
+because it is no longer a repo root in the installed case. Writable state (`checkpoints.db`,
+`.chroma/`) stays CWD-relative — an installed package must not write into `site-packages`.
+(3) No console script: `python -m uvicorn gate.api.app:app` already works, and a new module would
+need new tests to hold the 100% coverage gate for no functional gain. (4) CI first shipped without
+`ruff format --check` — ruff 0.16 reformats 9 existing files, and an unrequested formatting sweep
+was out of scope. The user then asked for a pre-commit hook running exactly that, which makes the
+sweep necessary (a hook that fails on the first commit is useless), so the 9 files were formatted
+and the CI check restored. The hook is the `pre-commit` framework pinned to `ruff-pre-commit`
+v0.16.0 rather than a hand-written `.git/hooks/pre-commit`, because a shell script in `.git/` is not
+version-controlled and so never reaches a contributor. Note the asymmetry: the hooks match only
+py/pyi/ipynb, while CI's `ruff format --check .` also covers Python blocks inside markdown.
+Version: bumped to 0.2.0 first, on the reasoning that installability is a new capability; the user
+overrode this to 0.1.1 since no pipeline feature changed. v0.1.0 is tagged but was never published
+and would install broken, so 0.1.1 is the first PyPI artifact.
+
+Mid-task the user supplied a `publish.yml` template from another project and asked for both PyPI and
+TestPyPI. Adopted it (release-published -> PyPI, workflow_dispatch -> TestPyPI) over the
+tag-triggered single-target workflow first written, fixing the template's hardcoded
+`mcp_cassette-` filename in its tag-vs-version guard and adding the dependency audit.
+
+**Impact / Risk:** `pip-audit` of the locked runtime set reports PYSEC-2026-311 / CVE-2026-45829
+against every `chromadb>=1.0.0` with no fixed release: pre-auth RCE in the Chroma *server*'s
+collections endpoint. This project embeds Chroma through `persist_directory` and never runs the
+server, so the vulnerable endpoint does not exist here; the publish workflow ignores that one ID by
+name, with the reasoning inline. Revisit when chromadb ships a fix. Publishing also depends on
+one-time out-of-band setup (Trusted Publishing publishers plus `pypi`/`testpypi` GitHub
+environments) that no repo file can assert.
+**Outcome:** `uv build` produces both distributions; extracting the wheel and importing
+`gate.paths` off it resolves the policy corpus, all three fixtures, the investigator sandbox, and
+`index.html` from `gate/_bundled/`. The sdist excludes `.agents_workspace/`. 97 tests pass at 100%
+statement and branch coverage; ruff check and mypy strict clean.

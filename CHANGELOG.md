@@ -5,6 +5,34 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-07-26
+
+First release published to PyPI: `pip install pr-compliance-gate`. No functional change to the
+pipeline — packaging, licensing, and release automation only.
+
+### Added
+
+- Publishing metadata in `pyproject.toml` — Apache-2.0 license and `LICENSE` file, authors,
+  trove classifiers, and project URLs.
+- The policy corpus, PR fixtures, and UI are bundled into the wheel, so an installed package can
+  ingest, serve the UI, and run the demo fixtures without a repository checkout.
+- GitHub Actions: `ci.yml` (ruff, `mypy --strict`, and the coverage-gated suite on 3.12 and 3.13)
+  and `publish.yml` — build, `pip-audit` of the locked runtime dependencies, then Trusted
+  Publishing to TestPyPI on `workflow_dispatch` and to PyPI on a published release, guarded by a
+  check that the release tag matches the built distribution.
+- `pre-commit` config running `ruff check --fix` and `ruff format` on commit
+  (`uv run pre-commit install` once per clone).
+
+### Fixed
+
+- `gate.paths` resolved its asset directories two levels above the package, which only exists in a
+  source checkout — an installed package could not find `data/` or `static/`. It now prefers the
+  bundled copy and falls back to the repo root. `REPO_ROOT` is renamed `ASSET_ROOT` accordingly.
+- Documented install command is `uv sync --extra dev`; plain `uv sync` does not install the dev
+  extra, so the documented test commands failed on a fresh checkout.
+- Reformatted the eight source and test files that had drifted from `ruff format`, so the new
+  pre-commit hook and the CI format check start from a clean tree.
+
 ## [0.1.0] - 2026-07-25
 
 Initial release of the PR Compliance Gate MVP.
@@ -39,4 +67,5 @@ Initial release of the PR Compliance Gate MVP.
   The default `pytest` run makes no API calls.
 - `mypy --strict` and `ruff` clean.
 
+[0.1.1]: https://github.com/cheneeheng/pr-compliance-gate/releases/tag/v0.1.1
 [0.1.0]: https://github.com/cheneeheng/pr-compliance-gate/releases/tag/v0.1.0

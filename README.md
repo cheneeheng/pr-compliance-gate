@@ -12,15 +12,32 @@ review survives a process restart and resumes where it stopped.
 
 **Scope:** a portfolio artifact demonstrating production-grade agent orchestration — cost gating,
 failure modes, human-in-the-loop — not a hosted product. It reads pull requests from local
-fixtures rather than the live GitHub API, is single-user with no auth, and is not published to
-PyPI. Python 3.12+.
+fixtures rather than the live GitHub API, and is single-user with no auth. Python 3.12+.
+
+## Install
+
+From PyPI — the policy corpus, PR fixtures, and UI ship inside the wheel, so the demo runs
+without a checkout:
 
 ```bash
-uv sync                                   # install dependencies
+pip install pr-compliance-gate
+export ANTHROPIC_API_KEY=sk-ant-...       # or put it in a .env in the working directory
+python -m gate.intake.ingest              # embed the policy corpus into Chroma (one-time)
+python -m uvicorn gate.api.app:app        # serve the API + UI on http://127.0.0.1:8000
+```
+
+From a checkout, for development:
+
+```bash
+uv sync --extra dev                       # install, including dev tooling
+uv run pre-commit install                 # ruff check + format on commit (once per clone)
 cp .env.example .env                      # then set ANTHROPIC_API_KEY
 uv run python -m gate.intake.ingest       # embed the policy corpus into Chroma (one-time)
 uv run uvicorn gate.api.app:app --reload  # serve the API + UI on http://127.0.0.1:8000
 ```
+
+Both write `checkpoints.db` and `.chroma/` into the current working directory (override with
+`GATE_DB_PATH` / `GATE_CHROMA_DIR`).
 
 The FastAPI app serves the UI same-origin — no CORS, no auth: a single-user local demo.
 
@@ -90,5 +107,9 @@ uv run pytest -m llm     # tests/system: behavioral evals against the real API (
 
 ## Out of MVP scope
 
-Live GitHub intake, auth/multi-user, hosted deployment, packaging, tracing dashboards,
-pagination, real static-analysis investigator tools. See `.agents_workspace/planning/v1`.
+Live GitHub intake, auth/multi-user, hosted deployment, tracing dashboards, pagination, real
+static-analysis investigator tools. See `.agents_workspace/planning/v1`.
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE).

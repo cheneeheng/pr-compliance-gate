@@ -1,0 +1,11 @@
+# Enable once per clone: `uv run pre-commit install`
+# Keep `rev` in step with the ruff that CI resolves; a drifting pair means the hook passes what CI
+# then rejects. The hooks only see py/pyi/ipynb — CI's `ruff format --check .` also covers the
+# Python blocks inside markdown.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.0
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format

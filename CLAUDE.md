@@ -12,7 +12,8 @@ hosted product. Intake is from local fixtures, not live GitHub; it is single-use
 ## Commands
 
 ```bash
-uv sync                                   # install (incl. dev extras)
+uv sync --extra dev                       # install (plain `uv sync` skips the dev extra)
+uv run pre-commit install                 # once per clone: ruff check --fix + format on commit
 cp .env.example .env                      # then set ANTHROPIC_API_KEY for real runs
 uv run python -m gate.intake.ingest       # embed the policy corpus into Chroma (one-time)
 uv run uvicorn gate.api.app:app --reload  # serve API + UI at http://127.0.0.1:8000
@@ -133,8 +134,12 @@ this survives process restarts.
 
 - **Config**: all knobs are env-driven via `pydantic-settings` (`config.py`, `GATE_*` prefix).
   `get_settings()` is `lru_cache`d — tests must `get_settings.cache_clear()` (conftest does this).
-- **Paths**: never use CWD-relative paths. `paths.py` anchors everything to `REPO_ROOT`
-  (resolved from `__file__`); `repo_snapshot_dir(pr_id)` is the investigator sandbox root.
+- **Paths**: never use CWD-relative paths for shipped assets. `paths.py` anchors them to
+  `ASSET_ROOT`, resolved from `__file__` — the wheel's bundled copy (`gate/_bundled/`, populated by
+  hatch `force-include`) when present, else the repo root. Adding a runtime asset directory means
+  adding it to that `force-include` map too. `repo_snapshot_dir(pr_id)` is the investigator
+  sandbox root. Writable state (`checkpoints.db`, `.chroma/`) is CWD-relative on purpose: an
+  installed package must not write into `site-packages`.
 - **Fixtures**: a sample PR is `data/sample_prs/<pr_id>/` with `meta.json`, `diff.patch`, and a
   `repo/` snapshot. Changed-file paths are parsed from `diff --git` headers. Malformed fixtures
   fail loud with `FixtureError` (422), never a silently empty review.

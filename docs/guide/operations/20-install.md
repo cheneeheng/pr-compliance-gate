@@ -23,18 +23,26 @@ One process serves everything:
 ## Prerequisites
 
 - Python 3.12 or newer.
-- [`uv`](https://docs.astral.sh/uv/) on `PATH`.
+- [`uv`](https://docs.astral.sh/uv/) on `PATH` (for the from-source install below).
 - An Anthropic API key with access to the configured models.
 - Outbound HTTPS to the Anthropic API.
 - Roughly 500 MB free disk: the local embedding model is downloaded on first ingest.
+
+The steps below install from a checkout, which is what you want if you will change the policy
+corpus or the fixtures. To run the service as-is, `pip install pr-compliance-gate` instead — the
+corpus, fixtures, and UI are bundled in the wheel — then skip to step 2, dropping every `uv run`
+prefix.
 
 ## Steps
 
 1. Install dependencies, including dev extras:
 
    ```bash
-   uv sync
+   uv sync --extra dev
    ```
+
+   Plain `uv sync` installs runtime dependencies only; the `pytest`/`ruff`/`mypy` tooling lives in
+   the `dev` extra.
 
 2. Create the environment file from the template:
 
