@@ -33,9 +33,7 @@ async def verdict(state: ReviewState) -> dict[str, object]:
     decision = state.human_decision
     if decision is None:
         outcome = Outcome.auto_approved
-        rationale = (
-            f"Auto-approved: risk score below threshold; {_findings_summary(state)}."
-        )
+        rationale = f"Auto-approved: risk score below threshold; {_findings_summary(state)}."
     else:
         outcome = (
             Outcome.approved if decision.action == DecisionAction.approve else Outcome.rejected

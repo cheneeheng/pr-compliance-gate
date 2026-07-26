@@ -77,9 +77,7 @@ async def reconcile(state: ReviewState) -> dict[str, object]:
             f"loop budget of {settings.gate_max_cycles} investigation cycle(s) exhausted "
             "with open questions remaining"
         )
-        return _route(
-            state, ROUTE_HUMAN_GATE, EscalationRecord(reason="max_cycles", detail=detail)
-        )
+        return _route(state, ROUTE_HUMAN_GATE, EscalationRecord(reason="max_cycles", detail=detail))
 
     # Rule 5: contested call across specialists on the same policy.
     disagree, policy_id = _has_disagreement(findings)

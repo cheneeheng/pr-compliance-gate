@@ -25,13 +25,9 @@ def derive_level(score: int, settings: Settings) -> RiskLevel:
 
 async def risk_score(state: ReviewState) -> dict[str, object]:
     settings = get_settings()
-    policy_summary = "\n".join(
-        f"[{c.policy_id}] {c.text[:300]}" for c in state.policy_context
-    )
+    policy_summary = "\n".join(f"[{c.policy_id}] {c.text[:300]}" for c in state.policy_context)
     diff = truncate_diff(state.diff, settings.gate_max_diff_chars)
-    classification_json = (
-        state.classification.model_dump_json() if state.classification else "{}"
-    )
+    classification_json = state.classification.model_dump_json() if state.classification else "{}"
     user = (
         f"Classification:\n{classification_json}\n\n"
         f"Relevant policy excerpts:\n{policy_summary or '(none retrieved)'}\n\n"

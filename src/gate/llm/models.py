@@ -55,9 +55,7 @@ async def structured_call[T: BaseModel](
 ) -> T:
     """Invoke ``model`` for a single structured-output turn. Owns message construction."""
     structured = model.with_structured_output(schema)
-    result = await structured.ainvoke(
-        [SystemMessage(content=system), HumanMessage(content=user)]
-    )
+    result = await structured.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
     return result  # type: ignore[return-value]  # with_structured_output returns schema instance
 
 
