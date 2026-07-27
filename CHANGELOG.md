@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.1] - 2026-07-26
+## [0.1.1] - 2026-07-27
 
 First release published to PyPI: `pip install pr-compliance-gate`. No functional change to the
 pipeline — packaging, licensing, and release automation only.
@@ -22,8 +22,28 @@ pipeline — packaging, licensing, and release automation only.
   check that the release tag matches the built distribution.
 - `pre-commit` config running `ruff check --fix` and `ruff format` on commit
   (`uv run pre-commit install` once per clone).
+- `gate.__version__`, read from the installed distribution metadata so the version string is
+  never duplicated in source.
+- `GATE_RISK_HIGH_BOUND` in `.env.example`; it was documented and honoured but absent from the
+  template.
+
+### Security
+
+- `pr_id` arrives from the request body and was joined onto the fixture directory unvalidated —
+  and the same value becomes the investigator sub-agent's sandbox root. A `..` or absolute
+  segment could therefore relocate the sandbox itself, outside the path checks
+  `resolve_in_sandbox` applies *within* it. `load_pr` now rejects any id that is not a plain
+  directory name (`FixtureError` -> 422).
 
 ### Fixed
+
+- `pytest -m llm` silently selected zero tests: the system evals are named `eval_*.py`, which
+  pytest's default `python_files` never matches. All four eval modules were uncollectable despite
+  being documented in the README, `CLAUDE.md`, and the operator guide.
+- The UI's "Reviews", "← Reviews", and per-review links were `<a>` elements without `href`, so
+  they were unreachable by keyboard and took no focus. They are now `<button>`s.
+- The install guide told a `pip install` reader to skip to the step that copies `.env.example` —
+  a file no wheel ships. It now points them at setting the key in the environment.
 
 - `gate.paths` resolved its asset directories two levels above the package, which only exists in a
   source checkout — an installed package could not find `data/` or `static/`. It now prefers the

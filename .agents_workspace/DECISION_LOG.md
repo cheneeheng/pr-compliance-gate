@@ -259,3 +259,44 @@ environments) that no repo file can assert.
 `gate.paths` off it resolves the policy corpus, all three fixtures, the investigator sandbox, and
 `index.html` from `gate/_bundled/`. The sdist excludes `.agents_workspace/`. 97 tests pass at 100%
 statement and branch coverage; ruff check and mypy strict clean.
+
+### Entry 12
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-07-27
+**Task:** Pre-release audit of the whole repo, ahead of the first PyPI publish.
+
+**Context:** The audit turned up four defects and several judgement calls the user had not
+scoped. The defects: `pytest -m llm` selected zero tests (the evals are `eval_*.py`, which
+pytest's default `python_files` never matches, so all four modules were uncollectable while three
+documents advertised the command); `pr_id` reached the filesystem unvalidated from the request
+body; three UI click targets were `<a>` without `href`, so keyboard-unreachable; and the install
+guide sent a `pip install` reader to a step that copies a file no wheel ships.
+
+**Decision:** Fixed all four. `pr_id` validation went into `loader.load_pr` rather than a
+constrained field on the `StartReview` request model, because `load_pr` is also the intake node's
+entry point and the value flows on to `paths.repo_snapshot_dir` as the investigator's sandbox
+root — validating at the single chokepoint covers the graph path too, and reuses the existing
+`FixtureError` -> 422 mapping instead of adding a second error shape. The pattern forbids `.`
+outright so `..` cannot be expressed at all.
+
+Version: folded into 0.1.1 rather than cutting 0.1.2, since v0.1.1 is prepared on this branch but
+neither tagged nor published — there is no released artifact to supersede.
+
+Deliberately **not** changed, and reported to the user instead: the `GATE_MODEL_SPECIALIST` /
+`_INVESTIGATOR` default `claude-sonnet-4-6`, which is unverifiable from here and is already
+flagged in Entry 2, the README, and `21-configure.md`; the absence of rate limiting and auth on
+the mutation endpoints, which the plan puts out of MVP scope and the docs state explicitly; and
+in-flight graph tasks not being drained at lifespan shutdown.
+
+**Impact / Risk:** Collecting the evals means `pytest -m llm` now bills real API calls where it
+previously did nothing — intended, and the default run is unaffected (`-m 'not llm'` deselects
+all 10). `load_pr` rejecting non-plain ids is a behaviour change for any caller that passed a
+path; no shipped fixture id contains a `.` or separator. `gate.__init__` now reads distribution
+metadata at import, so `import gate` requires the package to be installed rather than merely on
+`PYTHONPATH` — true of every documented install path.
+**Outcome:** 103 tests pass at 100% statement and branch coverage; ruff, `ruff format --check`,
+and mypy strict clean. Wheel rebuilt and re-verified from a throwaway venv: `gate.__version__`
+reports 0.1.1, the bundled fixtures load, and the three traversal payloads are rejected.
+`pip-audit` of the locked runtime set still reports only the known chromadb PYSEC-2026-311.
