@@ -33,6 +33,17 @@ def test_load_pr_missing_raises() -> None:
         load_pr("does_not_exist")
 
 
+@pytest.mark.parametrize(
+    "pr_id",
+    ["../secrets", "..", "003_auth_change/repo", "/etc/passwd", "C:\\Windows", ""],
+)
+def test_load_pr_rejects_unsafe_ids(pr_id: str) -> None:
+    """`pr_id` reaches the filesystem and becomes the investigator's sandbox root — it must be a
+    plain directory name, never a path."""
+    with pytest.raises(FixtureError, match="invalid sample PR id"):
+        load_pr(pr_id)
+
+
 def test_malformed_meta_raises(tmp_path: Path) -> None:
     (tmp_path / "meta.json").write_text("{ not valid json", encoding="utf-8")
     (tmp_path / "diff.patch").write_text("diff --git a/x b/x\n", encoding="utf-8")
