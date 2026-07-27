@@ -30,8 +30,10 @@ One process serves everything:
 
 The steps below install from a checkout, which is what you want if you will change the policy
 corpus or the fixtures. To run the service as-is, `pip install pr-compliance-gate` instead — the
-corpus, fixtures, and UI are bundled in the wheel — then skip to step 2, dropping every `uv run`
-prefix.
+corpus, fixtures, and UI are bundled in the wheel. A wheel install ships no `.env.example`, so
+skip steps 1–2 and set the key directly in the environment (`export ANTHROPIC_API_KEY=sk-ant-...`,
+or write your own `.env` in the working directory), then follow steps 4–5 with every `uv run`
+prefix dropped.
 
 ## Steps
 
