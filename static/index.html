@@ -19,7 +19,10 @@
     button:disabled { opacity: 0.5; cursor: not-allowed; }
     button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
     select, textarea, input { font: inherit; background: #222634; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
-    a.link { color: var(--accent); cursor: pointer; text-decoration: none; }
+    /* In-page navigation targets nothing (no URL routing), so these are buttons — a bare <a>
+       without href is not focusable or activatable from the keyboard. */
+    button.link { color: var(--accent); cursor: pointer; background: none; border: none; padding: 0; }
+    button.link:hover { text-decoration: underline; }
     table { width: 100%; border-collapse: collapse; }
     th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
     th { color: var(--muted); font-weight: 600; font-size: 13px; }
@@ -44,7 +47,7 @@
 <body>
   <header>
     <h1>PR Compliance Gate</h1>
-    <a class="link" id="home-link">Reviews</a>
+    <button type="button" class="link" id="home-link">Reviews</button>
   </header>
   <main>
     <div id="banner-slot"></div>
@@ -86,7 +89,7 @@
       const options = prs.map((p) => `<option value="${esc(p.pr_id)}">${esc(p.title)} (${p.files_changed_count} files)</option>`).join("");
       const rows = reviews.map((r) => `
         <tr>
-          <td><a class="link" data-thread="${esc(r.thread_id)}">${esc(r.pr_id)}</a></td>
+          <td><button type="button" class="link" data-thread="${esc(r.thread_id)}">${esc(r.pr_id)}</button></td>
           <td><span class="badge ${esc(r.status)}">${esc(r.status)}</span></td>
           <td>${r.risk_level ? esc(r.risk_level) : "—"}</td>
         </tr>`).join("");
@@ -149,7 +152,7 @@
       const c = s.classification, r = s.risk, inv = s.investigation, esc_ = s.escalation, v = s.verdict;
       view.innerHTML = `
         <div class="toolbar">
-          <a class="link" id="back">← Reviews</a>
+          <button type="button" class="link" id="back">← Reviews</button>
           <span class="badge ${esc(s.status)}">${esc(s.status)}</span>
           <span class="muted">${esc(s.pr_id)}</span>
         </div>
