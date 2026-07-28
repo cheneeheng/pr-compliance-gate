@@ -300,3 +300,35 @@ metadata at import, so `import gate` requires the package to be installed rather
 and mypy strict clean. Wheel rebuilt and re-verified from a throwaway venv: `gate.__version__`
 reports 0.1.1, the bundled fixtures load, and the three traversal payloads are rejected.
 `pip-audit` of the locked runtime set still reports only the known chromadb PYSEC-2026-311.
+
+### Entry 13
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-07-28
+**Task:** Hold the PyPI publication, and make the README pipeline diagram legible.
+
+**Context:** The user decided not to publish to PyPI for now — the package should only go there
+once it is usable for productive work, e.g. with live GitHub intake — and asked for the note to
+land in the README, the changelog, and the open PR. Ambiguity the user did not resolve: whether
+holding publication means unwinding the packaging work on `chore/prep-pypi-release` (metadata,
+`publish.yml`, the 0.1.1 bump, the bundled-asset fix).
+
+**Decision:** Kept all of it and reframed it as "release-ready, deliberately unpublished". The
+asset-bundling fix is a real bug fix independent of publishing, `publish.yml` cannot fire on its
+own (only `workflow_dispatch` or a published release), and the version bump documents a real
+packaging change. Reverting would have to be redone verbatim when live intake lands. The hold is
+recorded in three places with the unblocking condition stated, plus the operator install guide,
+which told readers to run `pip install pr-compliance-gate` — a command that would now 404.
+
+Pipeline diagram: replaced the ASCII block with a Mermaid `flowchart` colour-coded by spend
+(green = Haiku/retrieval/pure-Python routing, orange = Sonnet specialists and the Agent SDK
+investigator, blue = the human gate), with the two cost gates as edge labels. Mermaid over ASCII
+because GitHub renders it natively; the earlier argument for ASCII — PyPI's long-description
+renderer does not do Mermaid — is moot now that the README is not shipping to PyPI.
+
+**Impact / Risk:** Docs only; no source, test, or workflow change, so the coverage gate and CI are
+unaffected. Risk is that the Mermaid block renders only on surfaces that support it — GitHub does;
+a plain-text reader now sees diagram source instead of an ASCII sketch.
+**Outcome:** README, CHANGELOG, `docs/guide/operations/20-install.md`, and PR #2 (title and body)
+updated.

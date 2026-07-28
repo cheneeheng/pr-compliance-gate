@@ -16,17 +16,10 @@ fixtures rather than the live GitHub API, and is single-user with no auth. Pytho
 
 ## Install
 
-From PyPI — the policy corpus, PR fixtures, and UI ship inside the wheel, so the demo runs
-without a checkout:
-
-```bash
-pip install pr-compliance-gate
-export ANTHROPIC_API_KEY=sk-ant-...       # or put it in a .env in the working directory
-python -m gate.intake.ingest              # embed the policy corpus into Chroma (one-time)
-python -m uvicorn gate.api.app:app        # serve the API + UI on http://127.0.0.1:8000
-```
-
-From a checkout, for development:
+**Not published to PyPI.** The project is packaged and release-ready — the policy corpus, PR
+fixtures, and UI are bundled into the wheel, so an installed copy runs without a checkout — but it
+stays unpublished until it is useful for productive work, which means live GitHub intake rather
+than local fixtures. Until then, install from a checkout:
 
 ```bash
 uv sync --extra dev                       # install, including dev tooling
@@ -36,23 +29,58 @@ uv run python -m gate.intake.ingest       # embed the policy corpus into Chroma 
 uv run uvicorn gate.api.app:app --reload  # serve the API + UI on http://127.0.0.1:8000
 ```
 
-Both write `checkpoints.db` and `.chroma/` into the current working directory (override with
-`GATE_DB_PATH` / `GATE_CHROMA_DIR`).
+`uv build` produces a wheel that installs and runs the same way (`python -m gate.intake.ingest`,
+`python -m uvicorn gate.api.app:app`) with `ANTHROPIC_API_KEY` set in the environment — the
+packaging is exercised, just not published.
+
+Either way, `checkpoints.db` and `.chroma/` are written into the current working directory
+(override with `GATE_DB_PATH` / `GATE_CHROMA_DIR`).
 
 The FastAPI app serves the UI same-origin — no CORS, no auth: a single-user local demo.
 
 ## Pipeline
 
+```mermaid
+flowchart TD
+    intake(["intake<br/>load the PR fixture"]) --> classify["classify<br/>Haiku"]
+    classify --> retrieve["retrieve_policy<br/>Chroma"]
+    retrieve --> risk{"risk_score<br/>Haiku"}
+
+    risk -->|"COST GATE 1<br/>low risk: no Sonnet spend"| verdict
+    risk -->|"at or above threshold"| specialists
+
+    subgraph specialists ["specialists — Sonnet, parallel, timeout-wrapped"]
+        direction LR
+        security["security"]
+        licensing["license"]
+    end
+
+    specialists --> reconcile{"reconcile<br/>pure-Python rule ladder"}
+
+    reconcile -->|"COST GATE 2<br/>needs more context<br/>and loop budget remains"| investigate
+    reconcile -->|"blocking finding, timeout,<br/>budget exhausted, or disagreement"| human
+    reconcile -->|"clean"| verdict
+
+    investigate["investigate<br/>Agent SDK sub-agent<br/>3 read-only sandboxed tools<br/>hard turn / tool / byte budgets"] --> specialists
+
+    human["human_gate<br/>LangGraph interrupt"] -->|"approve, reject"| verdict
+    human -->|"request_info"| investigate
+
+    verdict(["verdict<br/>auto_approved, approved, rejected"])
+
+    classDef cheap fill:#d7ead0,stroke:#4b8b3b,color:#152e10
+    classDef paid fill:#fbe3c6,stroke:#c07a25,color:#3d2607
+    classDef person fill:#d5e3f7,stroke:#3a6ea5,color:#0f2337
+
+    class intake,classify,retrieve,risk,reconcile,verdict cheap
+    class security,licensing,investigate paid
+    class human person
 ```
-intake -> classify (Haiku) -> retrieve_policy -> risk_score (Haiku)
-  risk < threshold            -> verdict (auto_approved)          [cost gate #1: no Sonnet spend]
-  else -> {security, license} specialists (Sonnet, parallel, timeout-wrapped)
-       -> reconcile (pure-Python routing brain)
-            needs_more_context & budget -> investigate (Agent SDK sub-agent)  [cost gate #2]
-            block / escalation           -> human_gate (interrupt)
-            clean                         -> verdict
-  human_gate: approve|reject -> verdict ; request_info -> investigate
-```
+
+Green is the cheap path — Haiku, retrieval, and pure-Python routing. Orange is where real money is
+spent: the Sonnet specialists and the Agent SDK investigator. The two gates exist to keep traffic
+out of the orange band, and `reconcile` decides the route in plain Python, never with an LLM call.
+Every node checkpoints to SQLite, so the human gate can hold a review across a restart.
 
 ## Demo script
 
@@ -109,6 +137,11 @@ uv run pytest -m llm     # tests/system: behavioral evals against the real API (
 
 Live GitHub intake, auth/multi-user, hosted deployment, tracing dashboards, pagination, real
 static-analysis investigator tools. See `.agents_workspace/planning/v1`.
+
+Publishing to PyPI is also deliberately on hold. The wheel is built, audited, and verified to run
+standalone, and `publish.yml` is wired for Trusted Publishing — but a package on PyPI implies it is
+worth installing for real work, and reading pull requests from local fixtures is not that. Live
+GitHub intake is the gate: it lands first, then the package ships.
 
 ## License
 
