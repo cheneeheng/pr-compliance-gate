@@ -100,11 +100,15 @@ def _build_tools(root: Path, tracker: _Tracker) -> list[SdkMcpTool[object]]:
         rel = path.relative_to(root).as_posix()
         if rel not in tracker.files_examined:
             tracker.files_examined.append(rel)
-        return _tool_text(_truncate(path.read_text(encoding="utf-8", errors="replace"),
-                                    tracker.max_file_chars))
+        return _tool_text(
+            _truncate(path.read_text(encoding="utf-8", errors="replace"), tracker.max_file_chars)
+        )
 
-    @tool("grep_repo", "Search the repo snapshot for a substring/regex-free pattern.",
-          {"pattern": str})
+    @tool(
+        "grep_repo",
+        "Search the repo snapshot for a substring/regex-free pattern.",
+        {"pattern": str},
+    )
     async def grep_repo(args: dict[str, object]) -> dict[str, object]:
         if tracker.budget_exhausted():
             return _tool_text("tool-call budget exhausted; stop and report.", is_error=True)
@@ -137,11 +141,8 @@ def _build_tools(root: Path, tracker: _Tracker) -> list[SdkMcpTool[object]]:
         tracker.tool_calls += 1
         path = _resolve(str(args.get("path", ".")))
         if path is None or not path.is_dir():
-            return _tool_text(f"no such directory in snapshot: {args.get('path')!r}",
-                              is_error=True)
-        entries = sorted(
-            f"{p.name}/" if p.is_dir() else p.name for p in path.iterdir()
-        )
+            return _tool_text(f"no such directory in snapshot: {args.get('path')!r}", is_error=True)
+        entries = sorted(f"{p.name}/" if p.is_dir() else p.name for p in path.iterdir())
         return _tool_text("\n".join(entries) if entries else "(empty)")
 
     return [read_file, grep_repo, list_dir]

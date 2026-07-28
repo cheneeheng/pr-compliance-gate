@@ -1,0 +1,79 @@
+name: Publish
+
+# DISABLED. Publication to PyPI is on hold until the pipeline reads live GitHub pull
+# requests instead of local fixtures. GitHub only registers workflows ending in .yml or
+# .yaml, so the `.disabled` suffix means no trigger here can fire — not the `release:
+# published` one, not the manual dispatch. To re-enable: `git mv` it back to publish.yml
+# and complete the one-time Trusted Publishing setup described below.
+#
+# Trusted Publishing (OIDC): the pypi/testpypi environments are registered as
+# pending publishers on (test.)pypi.org — no API tokens stored in the repo.
+# One-time setup, on each of pypi.org and test.pypi.org: Publishing -> add a GitHub
+# publisher (owner `cheneeheng`, repo `pr-compliance-gate`, workflow `publish.yml`,
+# environment `pypi` / `testpypi`), then create the matching GitHub environments.
+on:
+  release:
+    types: [published]
+  workflow_dispatch: # manual trigger for the TestPyPI dry run
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+      # A release tag that disagrees with project.version would publish the wrong
+      # version under the right name, and PyPI never lets that filename be reused.
+      - name: Verify the release tag matches the built version
+        if: github.event_name == 'release'
+        run: |
+          test -f "dist/pr_compliance_gate-${GITHUB_REF_NAME#v}.tar.gz" || {
+            echo "tag ${GITHUB_REF_NAME} does not match the built distribution:"
+            ls dist
+            exit 1
+          }
+      - name: Audit the locked runtime dependencies
+        run: |
+          uv export --no-dev --no-emit-project --format requirements-txt > requirements.audit.txt
+          # PYSEC-2026-311 (chromadb, no fixed release): pre-auth RCE in the Chroma *server*'s
+          # collections endpoint. This project embeds Chroma via persist_directory and never
+          # serves it, so the vulnerable endpoint does not exist here.
+          uvx pip-audit -r requirements.audit.txt --ignore-vuln PYSEC-2026-311
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-testpypi:
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

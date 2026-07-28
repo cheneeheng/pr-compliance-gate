@@ -104,8 +104,13 @@ class _QueryStore:
     def similarity_search_with_score(self, query: str, k: int) -> list[tuple[Document, float]]:
         self.query, self.k = query, k
         return [
-            (Document(page_content="egress", metadata={"policy_id": "SEC-01",
-                                                       "source_file": "security.md"}), 0.25),
+            (
+                Document(
+                    page_content="egress",
+                    metadata={"policy_id": "SEC-01", "source_file": "security.md"},
+                ),
+                0.25,
+            ),
             (Document(page_content="orphan"), 0.9),  # metadata-less hit must not crash retrieval
         ]
 

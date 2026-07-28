@@ -133,7 +133,7 @@ Representative stub (route group pattern):
 # api/routes.py
 @router.post("/api/reviews")
 async def start_review(body: StartReview) -> dict:
-    thread_id = str(uuid4())          # UUIDs, never MAX+1 counters
+    thread_id = str(uuid4())  # UUIDs, never MAX+1 counters
     config = {"configurable": {"thread_id": thread_id}}
     await graph.ainvoke(initial_state(body.pr_id), config)  # runs until interrupt or END
     return {"thread_id": thread_id}

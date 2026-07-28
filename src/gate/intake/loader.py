@@ -19,6 +19,12 @@ from gate.paths import SAMPLE_PRS_DIR
 # `diff --git a/old/path b/new/path` — capture the post-image path.
 _DIFF_GIT = re.compile(r"^diff --git a/.+ b/(.+)$", re.MULTILINE)
 
+# A fixture id is a single directory name, never a path. `pr_id` arrives from the HTTP body and
+# is joined onto SAMPLE_PRS_DIR here *and* becomes the investigator's sandbox root
+# (`paths.repo_snapshot_dir`), so a `..` or absolute segment would relocate the sandbox itself.
+# No dot is allowed, so `..` cannot be expressed at all.
+_SAFE_PR_ID = re.compile(r"[A-Za-z0-9_-]+")
+
 
 class PRSummary(BaseModel):
     """List-view projection of a fixture."""
@@ -65,7 +71,10 @@ def _read_fixture_dir(pr_dir: Path) -> PRFixture:
 
 
 def load_pr(pr_id: str) -> PRFixture:
-    """Load a single fixture by id. Raises ``FixtureError`` if missing/malformed."""
+    """Load a single fixture by id. Raises ``FixtureError`` if the id is unsafe or the fixture is
+    missing/malformed."""
+    if not _SAFE_PR_ID.fullmatch(pr_id):
+        raise FixtureError(f"invalid sample PR id {pr_id!r}")
     pr_dir = SAMPLE_PRS_DIR / pr_id
     if not pr_dir.is_dir():
         raise FixtureError(f"no sample PR fixture named {pr_id!r}")

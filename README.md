@@ -1,43 +1,86 @@
 # PR Compliance Gate
 
-An agentic pipeline that reviews pull requests against organizational policy (security,
-licensing, data-handling) before merge. A cheap classifier and risk scorer gate the pipeline;
-medium/high-risk changes fan out to specialist agents, which can request deeper autonomous
-investigation; high-risk or contested reviews stop at a human approval gate. Every step is
-checkpointed to SQLite and resumable.
+A LangGraph + Claude Agent SDK pipeline that reviews pull requests against security, licensing,
+and data-handling policy before merge — cost-gated, human-in-the-loop.
 
-This is a portfolio artifact demonstrating production-grade agent orchestration — failure modes,
-cost gating, and human-in-the-loop — not a hosted product.
+A Haiku classifier and risk scorer gate the pipeline: sub-threshold changes are auto-approved
+without ever invoking a Sonnet specialist. Everything above the threshold fans out to parallel
+security and license specialists, which can request a deeper autonomous investigation — an Agent
+SDK sub-agent with three read-only sandboxed tools and hard turn/tool/byte budgets. Blocking or
+contested reviews stop at a human approval gate. Every step is checkpointed to SQLite, so a
+review survives a process restart and resumes where it stopped.
+
+**Scope:** a portfolio artifact demonstrating production-grade agent orchestration — cost gating,
+failure modes, human-in-the-loop — not a hosted product. It reads pull requests from local
+fixtures rather than the live GitHub API, and is single-user with no auth. Python 3.12+.
+
+## Install
+
+**Not published to PyPI.** The project is packaged and release-ready — the policy corpus, PR
+fixtures, and UI are bundled into the wheel, so an installed copy runs without a checkout — but it
+stays unpublished until it is useful for productive work, which means live GitHub intake rather
+than local fixtures. Until then, install from a checkout:
+
+```bash
+uv sync --extra dev                       # install, including dev tooling
+uv run pre-commit install                 # ruff check + format on commit (once per clone)
+cp .env.example .env                      # then set ANTHROPIC_API_KEY
+uv run python -m gate.intake.ingest       # embed the policy corpus into Chroma (one-time)
+uv run uvicorn gate.api.app:app --reload  # serve the API + UI on http://127.0.0.1:8000
+```
+
+`uv build` produces a wheel that installs and runs the same way (`python -m gate.intake.ingest`,
+`python -m uvicorn gate.api.app:app`) with `ANTHROPIC_API_KEY` set in the environment — the
+packaging is exercised, just not published.
+
+Either way, `checkpoints.db` and `.chroma/` are written into the current working directory
+(override with `GATE_DB_PATH` / `GATE_CHROMA_DIR`).
+
+The FastAPI app serves the UI same-origin — no CORS, no auth: a single-user local demo.
 
 ## Pipeline
 
+```mermaid
+flowchart TD
+    intake(["intake<br/>load the PR fixture"]) --> classify["classify<br/>Haiku"]
+    classify --> retrieve["retrieve_policy<br/>Chroma"]
+    retrieve --> risk{"risk_score<br/>Haiku"}
+
+    risk -->|"COST GATE 1<br/>low risk: no Sonnet spend"| verdict
+    risk -->|"at or above threshold"| specialists
+
+    subgraph specialists ["specialists — Sonnet, parallel, timeout-wrapped"]
+        direction LR
+        security["security"]
+        licensing["license"]
+    end
+
+    specialists --> reconcile{"reconcile<br/>pure-Python rule ladder"}
+
+    reconcile -->|"COST GATE 2<br/>needs more context<br/>and loop budget remains"| investigate
+    reconcile -->|"blocking finding, timeout,<br/>budget exhausted, or disagreement"| human
+    reconcile -->|"clean"| verdict
+
+    investigate["investigate<br/>Agent SDK sub-agent<br/>3 read-only sandboxed tools<br/>hard turn / tool / byte budgets"] --> specialists
+
+    human["human_gate<br/>LangGraph interrupt"] -->|"approve, reject"| verdict
+    human -->|"request_info"| investigate
+
+    verdict(["verdict<br/>auto_approved, approved, rejected"])
+
+    classDef cheap fill:#d7ead0,stroke:#4b8b3b,color:#152e10
+    classDef paid fill:#fbe3c6,stroke:#c07a25,color:#3d2607
+    classDef person fill:#d5e3f7,stroke:#3a6ea5,color:#0f2337
+
+    class intake,classify,retrieve,risk,reconcile,verdict cheap
+    class security,licensing,investigate paid
+    class human person
 ```
-intake -> classify (Haiku) -> retrieve_policy -> risk_score (Haiku)
-  risk < threshold            -> verdict (auto_approved)          [cost gate #1: no Sonnet spend]
-  else -> {security, license} specialists (Sonnet, parallel, timeout-wrapped)
-       -> reconcile (pure-Python routing brain)
-            needs_more_context & budget -> investigate (Agent SDK sub-agent)  [cost gate #2]
-            block / escalation           -> human_gate (interrupt)
-            clean                         -> verdict
-  human_gate: approve|reject -> verdict ; request_info -> investigate
-```
 
-## Setup
-
-```bash
-uv sync                      # install dependencies
-cp .env.example .env         # then set ANTHROPIC_API_KEY
-uv run python -m gate.intake.ingest   # embed the policy corpus into Chroma
-```
-
-## Run
-
-```bash
-uv run uvicorn gate.api.app:app --reload
-```
-
-Open http://127.0.0.1:8000 — the FastAPI app serves the UI (same origin, no CORS, no auth: a
-single-user local demo).
+Green is the cheap path — Haiku, retrieval, and pure-Python routing. Orange is where real money is
+spent: the Sonnet specialists and the Agent SDK investigator. The two gates exist to keep traffic
+out of the orange band, and `reconcile` decides the route in plain Python, never with an LLM call.
+Every node checkpoints to SQLite, so the human gate can hold a review across a restart.
 
 ## Demo script
 
@@ -92,5 +135,16 @@ uv run pytest -m llm     # tests/system: behavioral evals against the real API (
 
 ## Out of MVP scope
 
-Live GitHub intake, auth/multi-user, hosted deployment, packaging, tracing dashboards,
-pagination, real static-analysis investigator tools. See `.agents_workspace/planning/v1`.
+Live GitHub intake, auth/multi-user, hosted deployment, tracing dashboards, pagination, real
+static-analysis investigator tools. See `.agents_workspace/planning/v1`.
+
+Publishing to PyPI is also deliberately on hold. The wheel is built, audited, and verified to run
+standalone — but a package on PyPI implies it is worth installing for real work, and reading pull
+requests from local fixtures is not that. Live GitHub intake is the gate: it lands first, then the
+package ships. The release workflow is written and parked at
+`.github/workflows/publish.yml.disabled`; GitHub only registers `.yml`/`.yaml` files, so no trigger
+in it can fire until it is renamed back.
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE).

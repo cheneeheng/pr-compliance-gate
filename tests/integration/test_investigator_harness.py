@@ -101,9 +101,7 @@ async def test_an_sdk_failure_comes_back_as_an_inconclusive_report(
 async def test_a_failed_synthesis_turn_still_returns_what_the_loop_saw(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "gate.agents.investigator.query", _fake_query(_Assistant("partial notes"))
-    )
+    monkeypatch.setattr("gate.agents.investigator.query", _fake_query(_Assistant("partial notes")))
 
     async def _fail(*_a: Any, **_k: Any) -> _InvestigationAnswer:
         raise RuntimeError("structured output refused")

@@ -1,9 +1,10 @@
 """Runnable showcase: drive the three demo reviews end to end and narrate each stage.
 
-Unlike the ``llm``-marked eval (``tests/eval_demo.py``, which only asserts terminal outcomes),
-this prints the pipeline story — classification, the risk cost gate, specialist findings, the
-autonomous investigation with its tool-call count and cost, the human-in-the-loop decisions, and
-the final verdict — so you can see what the gate does without clicking through the UI.
+Unlike the ``llm``-marked eval (``tests/system/eval_demo.py``, which only asserts terminal
+outcomes), this prints the pipeline story — classification, the risk cost gate, specialist
+findings, the autonomous investigation with its tool-call count and cost, the human-in-the-loop
+decisions, and the final verdict — so you can see what the gate does without clicking through
+the UI.
 
 It drives the compiled LangGraph directly (in-memory checkpointer, scripted human decisions), so
 no server is needed.

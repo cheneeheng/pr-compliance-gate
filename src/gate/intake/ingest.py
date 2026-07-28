@@ -20,9 +20,7 @@ from gate.paths import POLICIES_DIR
 # Leading token of a policy heading, e.g. "SEC-01" in "SEC-01 — No new network egress".
 _POLICY_ID = re.compile(r"^([A-Z]{2,6}-\d{2,3})\b")
 
-_SPLITTER = MarkdownHeaderTextSplitter(
-    headers_to_split_on=[("#", "title"), ("##", "section")]
-)
+_SPLITTER = MarkdownHeaderTextSplitter(headers_to_split_on=[("#", "title"), ("##", "section")])
 
 
 def _chunk_file(text: str, source_file: str) -> list[Document]:

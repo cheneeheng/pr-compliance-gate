@@ -1,9 +1,36 @@
 [project]
 name = "pr-compliance-gate"
-version = "0.1.0"
-description = "Agentic pipeline that reviews pull requests against organizational policy before merge."
+version = "0.1.1"
+description = "A LangGraph + Claude Agent SDK pipeline that reviews pull requests against security, licensing, and data-handling policy before merge — cost-gated, human-in-the-loop."
 readme = "README.md"
 requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "EeHeng Chen", email = "eeheng.chen@gmail.com" }]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
+keywords = [
+    "langgraph",
+    "claude-agent-sdk",
+    "anthropic",
+    "agent-orchestration",
+    "human-in-the-loop",
+    "code-review-automation",
+    "policy-compliance",
+    "rag",
+    "fastapi",
+]
 dependencies = [
     # Orchestration
     "langgraph>=0.2",
@@ -35,14 +62,44 @@ dev = [
     "pytest-cov>=7.1",
     "ruff>=0.6",
     "mypy>=1.11",
+    "pip-audit>=2.7",
+    "pre-commit>=4.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/cheneeheng/pr-compliance-gate"
+Repository = "https://github.com/cheneeheng/pr-compliance-gate"
+Changelog = "https://github.com/cheneeheng/pr-compliance-gate/blob/main/CHANGELOG.md"
+Issues = "https://github.com/cheneeheng/pr-compliance-gate/issues"
+
 [build-system]
-requires = ["hatchling"]
+# >=1.27 for PEP 639 `license` / `license-files`.
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gate"]
+
+[tool.hatch.build.targets.wheel.force-include]
+# The policy corpus, PR fixtures, and UI are runtime assets, not dev-only files: an installed
+# wheel has no repo checkout to read them from. `gate.paths` looks in `_bundled/` first.
+"data" = "gate/_bundled/data"
+"static" = "gate/_bundled/static"
+
+[tool.hatch.build.targets.sdist]
+# Explicit so the agent workspace, planning notes, and local state stay out of the distribution.
+include = [
+    "src",
+    "tests",
+    "docs",
+    "examples",
+    "data",
+    "static",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".env.example",
+]
 
 [tool.ruff]
 line-length = 100
@@ -71,6 +128,9 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# The system evals are named `eval_*.py` to keep them visually distinct; without this they are
+# never collected and `pytest -m llm` silently selects nothing.
+python_files = ["test_*.py", "eval_*.py"]
 markers = [
     "llm: tests that make real Anthropic API calls (excluded from the default run)",
 ]

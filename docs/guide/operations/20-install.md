@@ -23,18 +23,29 @@ One process serves everything:
 ## Prerequisites
 
 - Python 3.12 or newer.
-- [`uv`](https://docs.astral.sh/uv/) on `PATH`.
+- [`uv`](https://docs.astral.sh/uv/) on `PATH` (for the from-source install below).
 - An Anthropic API key with access to the configured models.
 - Outbound HTTPS to the Anthropic API.
 - Roughly 500 MB free disk: the local embedding model is downloaded on first ingest.
+
+The steps below install from a checkout. The project is **not published to PyPI** — publication is
+on hold until the pipeline reads live GitHub pull requests instead of local fixtures — so there is
+no `pip install pr-compliance-gate` to run. You can still install a wheel you build yourself
+(`uv build`, then `pip install dist/pr_compliance_gate-*.whl`); the corpus, fixtures, and UI are
+bundled in it. Such an install ships no `.env.example`, so skip steps 1–2 and set the key directly
+in the environment (`export ANTHROPIC_API_KEY=sk-ant-...`, or write your own `.env` in the working
+directory), then follow steps 4–5 with every `uv run` prefix dropped.
 
 ## Steps
 
 1. Install dependencies, including dev extras:
 
    ```bash
-   uv sync
+   uv sync --extra dev
    ```
+
+   Plain `uv sync` installs runtime dependencies only; the `pytest`/`ruff`/`mypy` tooling lives in
+   the `dev` extra.
 
 2. Create the environment file from the template:
 

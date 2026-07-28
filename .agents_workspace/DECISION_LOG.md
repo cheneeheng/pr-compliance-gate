@@ -184,3 +184,160 @@ remains the only thing that exercises that.
 **Outcome:** 97 tests, 100% statement and branch coverage, ruff and mypy strict clean. Found and
 fixed a real bug on the way: `langchain-text-splitters` was imported by `intake/ingest.py` but
 never declared, so `uv run python -m gate.intake.ingest` failed on a clean install.
+
+### Entry 10
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-07-26
+**Task:** Make the repo's public text discoverable (README first screen, package metadata, GitHub repo description and topics).
+
+**Context:** Three surfaces carried three different pitches: an empty GitHub repo description, a
+generic `project.description` ("Agentic pipeline that reviews pull requests against organizational
+policy before merge"), and a README opening paragraph that named neither LangGraph nor the Claude
+Agent SDK — the two terms someone would actually search. Packaging is explicitly out of MVP scope,
+which makes it ambiguous how much PyPI metadata is warranted.
+**Decision:** Wrote one canonical one-liner and used it verbatim on all three surfaces. Added
+`project.keywords`, but deliberately no trove classifiers — classifiers only pay off on a published
+package, and this one is not published. Folded the `## Setup` / `## Run` sections into the first
+screen so the install command appears above the fold instead of duplicating it.
+**Impact / Risk:** Renaming/removing the `Setup` and `Run` headings breaks any external anchor
+links to `#setup` / `#run`; no in-repo links pointed at them.
+**Outcome:** README and `pyproject.toml` updated. The `gh repo edit` call for the description and
+topics failed with HTTP 403 (the PAT lacks repo-admin scope); the user applied that metadata by
+hand. Branch named `chore/prep-pypi-release` — the user reframed this work as the first step
+toward an actual PyPI release, which reopens the classifiers decision above whenever that release
+is cut.
+
+### Entry 11
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-07-26
+**Task:** Make the repo actually publishable to PyPI (metadata, license, installed-package correctness, workflows).
+
+**Context:** Entry 10 left packaging half-declared: keywords but no classifiers, no license of any
+kind, and README text asserting the project is not published. Four things were genuinely
+unresolved. (1) Licensing — a public, hard-to-reverse legal choice, so this one was asked rather
+than assumed; the user chose Apache-2.0. (2) `gate.paths` anchored every asset directory at
+`Path(__file__).parents[2]`, which is the repo root in a checkout and the directory above
+`site-packages` in a wheel — a `pip install` of this package could not find `data/` or `static/`,
+so ingest, the fixtures, and the UI would all fail. (3) Whether to add a console-script entry
+point. (4) Whether CI should enforce `ruff format`.
+**Decision:** (1) Apache-2.0 via PEP 639 (`license = "Apache-2.0"` + `license-files`), which
+requires `hatchling>=1.27`, and no `License ::` trove classifier — PEP 639 supersedes it.
+(2) Bundle `data/` and `static/` into the wheel via hatch `force-include` to `gate/_bundled/`, and
+have `paths.py` prefer that copy, falling back to the repo root; `REPO_ROOT` renamed `ASSET_ROOT`
+because it is no longer a repo root in the installed case. Writable state (`checkpoints.db`,
+`.chroma/`) stays CWD-relative — an installed package must not write into `site-packages`.
+(3) No console script: `python -m uvicorn gate.api.app:app` already works, and a new module would
+need new tests to hold the 100% coverage gate for no functional gain. (4) CI first shipped without
+`ruff format --check` — ruff 0.16 reformats 9 existing files, and an unrequested formatting sweep
+was out of scope. The user then asked for a pre-commit hook running exactly that, which makes the
+sweep necessary (a hook that fails on the first commit is useless), so the 9 files were formatted
+and the CI check restored. The hook is the `pre-commit` framework pinned to `ruff-pre-commit`
+v0.16.0 rather than a hand-written `.git/hooks/pre-commit`, because a shell script in `.git/` is not
+version-controlled and so never reaches a contributor. Note the asymmetry: the hooks match only
+py/pyi/ipynb, while CI's `ruff format --check .` also covers Python blocks inside markdown.
+Version: bumped to 0.2.0 first, on the reasoning that installability is a new capability; the user
+overrode this to 0.1.1 since no pipeline feature changed. v0.1.0 is tagged but was never published
+and would install broken, so 0.1.1 is the first PyPI artifact.
+
+Mid-task the user supplied a `publish.yml` template from another project and asked for both PyPI and
+TestPyPI. Adopted it (release-published -> PyPI, workflow_dispatch -> TestPyPI) over the
+tag-triggered single-target workflow first written, fixing the template's hardcoded
+`mcp_cassette-` filename in its tag-vs-version guard and adding the dependency audit.
+
+**Impact / Risk:** `pip-audit` of the locked runtime set reports PYSEC-2026-311 / CVE-2026-45829
+against every `chromadb>=1.0.0` with no fixed release: pre-auth RCE in the Chroma *server*'s
+collections endpoint. This project embeds Chroma through `persist_directory` and never runs the
+server, so the vulnerable endpoint does not exist here; the publish workflow ignores that one ID by
+name, with the reasoning inline. Revisit when chromadb ships a fix. Publishing also depends on
+one-time out-of-band setup (Trusted Publishing publishers plus `pypi`/`testpypi` GitHub
+environments) that no repo file can assert.
+**Outcome:** `uv build` produces both distributions; extracting the wheel and importing
+`gate.paths` off it resolves the policy corpus, all three fixtures, the investigator sandbox, and
+`index.html` from `gate/_bundled/`. The sdist excludes `.agents_workspace/`. 97 tests pass at 100%
+statement and branch coverage; ruff check and mypy strict clean.
+
+### Entry 12
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-07-27
+**Task:** Pre-release audit of the whole repo, ahead of the first PyPI publish.
+
+**Context:** The audit turned up four defects and several judgement calls the user had not
+scoped. The defects: `pytest -m llm` selected zero tests (the evals are `eval_*.py`, which
+pytest's default `python_files` never matches, so all four modules were uncollectable while three
+documents advertised the command); `pr_id` reached the filesystem unvalidated from the request
+body; three UI click targets were `<a>` without `href`, so keyboard-unreachable; and the install
+guide sent a `pip install` reader to a step that copies a file no wheel ships.
+
+**Decision:** Fixed all four. `pr_id` validation went into `loader.load_pr` rather than a
+constrained field on the `StartReview` request model, because `load_pr` is also the intake node's
+entry point and the value flows on to `paths.repo_snapshot_dir` as the investigator's sandbox
+root — validating at the single chokepoint covers the graph path too, and reuses the existing
+`FixtureError` -> 422 mapping instead of adding a second error shape. The pattern forbids `.`
+outright so `..` cannot be expressed at all.
+
+Version: folded into 0.1.1 rather than cutting 0.1.2, since v0.1.1 is prepared on this branch but
+neither tagged nor published — there is no released artifact to supersede.
+
+Deliberately **not** changed, and reported to the user instead: the `GATE_MODEL_SPECIALIST` /
+`_INVESTIGATOR` default `claude-sonnet-4-6`, which is unverifiable from here and is already
+flagged in Entry 2, the README, and `21-configure.md`; the absence of rate limiting and auth on
+the mutation endpoints, which the plan puts out of MVP scope and the docs state explicitly; and
+in-flight graph tasks not being drained at lifespan shutdown.
+
+**Impact / Risk:** Collecting the evals means `pytest -m llm` now bills real API calls where it
+previously did nothing — intended, and the default run is unaffected (`-m 'not llm'` deselects
+all 10). `load_pr` rejecting non-plain ids is a behaviour change for any caller that passed a
+path; no shipped fixture id contains a `.` or separator. `gate.__init__` now reads distribution
+metadata at import, so `import gate` requires the package to be installed rather than merely on
+`PYTHONPATH` — true of every documented install path.
+**Outcome:** 103 tests pass at 100% statement and branch coverage; ruff, `ruff format --check`,
+and mypy strict clean. Wheel rebuilt and re-verified from a throwaway venv: `gate.__version__`
+reports 0.1.1, the bundled fixtures load, and the three traversal payloads are rejected.
+`pip-audit` of the locked runtime set still reports only the known chromadb PYSEC-2026-311.
+
+### Entry 13
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-07-28
+**Task:** Hold the PyPI publication, and make the README pipeline diagram legible.
+
+**Context:** The user decided not to publish to PyPI for now — the package should only go there
+once it is usable for productive work, e.g. with live GitHub intake — and asked for the note to
+land in the README, the changelog, and the open PR. Ambiguity the user did not resolve: whether
+holding publication means unwinding the packaging work on `chore/prep-pypi-release` (metadata,
+`publish.yml`, the 0.1.1 bump, the bundled-asset fix).
+
+**Decision:** Kept all of it and reframed it as "release-ready, deliberately unpublished". The
+asset-bundling fix is a real bug fix independent of publishing, `publish.yml` cannot fire on its
+own (only `workflow_dispatch` or a published release), and the version bump documents a real
+packaging change. Reverting would have to be redone verbatim when live intake lands. The hold is
+recorded in three places with the unblocking condition stated, plus the operator install guide,
+which told readers to run `pip install pr-compliance-gate` — a command that would now 404.
+
+Pipeline diagram: replaced the ASCII block with a Mermaid `flowchart` colour-coded by spend
+(green = Haiku/retrieval/pure-Python routing, orange = Sonnet specialists and the Agent SDK
+investigator, blue = the human gate), with the two cost gates as edge labels. Mermaid over ASCII
+because GitHub renders it natively; the earlier argument for ASCII — PyPI's long-description
+renderer does not do Mermaid — is moot now that the README is not shipping to PyPI.
+
+**Impact / Risk:** Docs only; no source, test, or workflow change, so the coverage gate and CI are
+unaffected. Risk is that the Mermaid block renders only on surfaces that support it — GitHub does;
+a plain-text reader now sees diagram source instead of an ASCII sketch.
+**Outcome:** README, CHANGELOG, `docs/guide/operations/20-install.md`, and PR #2 (title and body)
+updated.
+
+**Amendment (same day):** the reasoning above — that `publish.yml` needs no change because it only
+fires on `workflow_dispatch` or a published release — was not enough for the user, who asked for it
+disabled outright. Done by renaming it to `publish.yml.disabled`: GitHub registers only `.yml` and
+`.yaml` under `.github/workflows`, so the file is inert while staying reviewable, diffable, and one
+`git mv` from working. Chosen over deleting it (the work would have to be redone), over stripping
+the triggers (a workflow with no `on:` is invalid YAML for Actions), and over `gh workflow disable`
+(that state lives in the GitHub UI, not the repo, so it would not survive a fork or a re-clone and
+would be invisible in review).

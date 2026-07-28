@@ -5,6 +5,60 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-07-27
+
+Packaging, licensing, and release automation only — no functional change to the pipeline.
+
+**Not published to PyPI.** The wheel is complete and verified to run standalone, but publication is
+deliberately on hold: the project reads pull requests from local fixtures, and a package on PyPI
+implies it is worth installing for real work. Live GitHub intake is the gate for publishing; until
+then, install from a checkout or a locally built wheel. The release workflow ships disabled — it is
+committed as `publish.yml.disabled`, which GitHub does not register, so no trigger in it can fire.
+
+### Added
+
+- Publishing metadata in `pyproject.toml` — Apache-2.0 license and `LICENSE` file, authors,
+  trove classifiers, and project URLs.
+- The policy corpus, PR fixtures, and UI are bundled into the wheel, so an installed package can
+  ingest, serve the UI, and run the demo fixtures without a repository checkout.
+- GitHub Actions: `ci.yml` (ruff, `mypy --strict`, and the coverage-gated suite on 3.12 and 3.13)
+  and a publish workflow — build, `pip-audit` of the locked runtime dependencies, then Trusted
+  Publishing to TestPyPI on `workflow_dispatch` and to PyPI on a published release, guarded by a
+  check that the release tag matches the built distribution. It is committed disabled (see above)
+  and has never run.
+- `pre-commit` config running `ruff check --fix` and `ruff format` on commit
+  (`uv run pre-commit install` once per clone).
+- `gate.__version__`, read from the installed distribution metadata so the version string is
+  never duplicated in source.
+- `GATE_RISK_HIGH_BOUND` in `.env.example`; it was documented and honoured but absent from the
+  template.
+
+### Security
+
+- `pr_id` arrives from the request body and was joined onto the fixture directory unvalidated —
+  and the same value becomes the investigator sub-agent's sandbox root. A `..` or absolute
+  segment could therefore relocate the sandbox itself, outside the path checks
+  `resolve_in_sandbox` applies *within* it. `load_pr` now rejects any id that is not a plain
+  directory name (`FixtureError` -> 422).
+
+### Fixed
+
+- `pytest -m llm` silently selected zero tests: the system evals are named `eval_*.py`, which
+  pytest's default `python_files` never matches. All four eval modules were uncollectable despite
+  being documented in the README, `CLAUDE.md`, and the operator guide.
+- The UI's "Reviews", "← Reviews", and per-review links were `<a>` elements without `href`, so
+  they were unreachable by keyboard and took no focus. They are now `<button>`s.
+- The install guide told a `pip install` reader to skip to the step that copies `.env.example` —
+  a file no wheel ships. It now points them at setting the key in the environment.
+
+- `gate.paths` resolved its asset directories two levels above the package, which only exists in a
+  source checkout — an installed package could not find `data/` or `static/`. It now prefers the
+  bundled copy and falls back to the repo root. `REPO_ROOT` is renamed `ASSET_ROOT` accordingly.
+- Documented install command is `uv sync --extra dev`; plain `uv sync` does not install the dev
+  extra, so the documented test commands failed on a fresh checkout.
+- Reformatted the eight source and test files that had drifted from `ruff format`, so the new
+  pre-commit hook and the CI format check start from a clean tree.
+
 ## [0.1.0] - 2026-07-25
 
 Initial release of the PR Compliance Gate MVP.
@@ -39,4 +93,5 @@ Initial release of the PR Compliance Gate MVP.
   The default `pytest` run makes no API calls.
 - `mypy --strict` and `ruff` clean.
 
+[0.1.1]: https://github.com/cheneeheng/pr-compliance-gate/releases/tag/v0.1.1
 [0.1.0]: https://github.com/cheneeheng/pr-compliance-gate/releases/tag/v0.1.0
