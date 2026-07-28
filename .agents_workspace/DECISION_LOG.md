@@ -332,3 +332,12 @@ unaffected. Risk is that the Mermaid block renders only on surfaces that support
 a plain-text reader now sees diagram source instead of an ASCII sketch.
 **Outcome:** README, CHANGELOG, `docs/guide/operations/20-install.md`, and PR #2 (title and body)
 updated.
+
+**Amendment (same day):** the reasoning above — that `publish.yml` needs no change because it only
+fires on `workflow_dispatch` or a published release — was not enough for the user, who asked for it
+disabled outright. Done by renaming it to `publish.yml.disabled`: GitHub registers only `.yml` and
+`.yaml` under `.github/workflows`, so the file is inert while staying reviewable, diffable, and one
+`git mv` from working. Chosen over deleting it (the work would have to be redone), over stripping
+the triggers (a workflow with no `on:` is invalid YAML for Actions), and over `gh workflow disable`
+(that state lives in the GitHub UI, not the repo, so it would not survive a fork or a re-clone and
+would be invisible in review).

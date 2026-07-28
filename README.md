@@ -139,9 +139,11 @@ Live GitHub intake, auth/multi-user, hosted deployment, tracing dashboards, pagi
 static-analysis investigator tools. See `.agents_workspace/planning/v1`.
 
 Publishing to PyPI is also deliberately on hold. The wheel is built, audited, and verified to run
-standalone, and `publish.yml` is wired for Trusted Publishing — but a package on PyPI implies it is
-worth installing for real work, and reading pull requests from local fixtures is not that. Live
-GitHub intake is the gate: it lands first, then the package ships.
+standalone — but a package on PyPI implies it is worth installing for real work, and reading pull
+requests from local fixtures is not that. Live GitHub intake is the gate: it lands first, then the
+package ships. The release workflow is written and parked at
+`.github/workflows/publish.yml.disabled`; GitHub only registers `.yml`/`.yaml` files, so no trigger
+in it can fire until it is renamed back.
 
 ## License
 

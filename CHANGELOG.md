@@ -9,11 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Packaging, licensing, and release automation only — no functional change to the pipeline.
 
-**Not published to PyPI.** The wheel is complete and verified to run standalone, and `publish.yml`
-is wired for Trusted Publishing, but publication is deliberately on hold: the project reads pull
-requests from local fixtures, and a package on PyPI implies it is worth installing for real work.
-Live GitHub intake is the gate for publishing; until then, install from a checkout or a locally
-built wheel.
+**Not published to PyPI.** The wheel is complete and verified to run standalone, but publication is
+deliberately on hold: the project reads pull requests from local fixtures, and a package on PyPI
+implies it is worth installing for real work. Live GitHub intake is the gate for publishing; until
+then, install from a checkout or a locally built wheel. The release workflow ships disabled — it is
+committed as `publish.yml.disabled`, which GitHub does not register, so no trigger in it can fire.
 
 ### Added
 
@@ -22,10 +22,10 @@ built wheel.
 - The policy corpus, PR fixtures, and UI are bundled into the wheel, so an installed package can
   ingest, serve the UI, and run the demo fixtures without a repository checkout.
 - GitHub Actions: `ci.yml` (ruff, `mypy --strict`, and the coverage-gated suite on 3.12 and 3.13)
-  and `publish.yml` — build, `pip-audit` of the locked runtime dependencies, then Trusted
+  and a publish workflow — build, `pip-audit` of the locked runtime dependencies, then Trusted
   Publishing to TestPyPI on `workflow_dispatch` and to PyPI on a published release, guarded by a
-  check that the release tag matches the built distribution. It stays dormant while publication is
-  on hold — both paths are manual or release-triggered, so nothing ships by accident.
+  check that the release tag matches the built distribution. It is committed disabled (see above)
+  and has never run.
 - `pre-commit` config running `ruff check --fix` and `ruff format` on commit
   (`uv run pre-commit install` once per clone).
 - `gate.__version__`, read from the installed distribution metadata so the version string is

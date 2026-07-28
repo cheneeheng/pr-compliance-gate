@@ -1,5 +1,11 @@
 name: Publish
 
+# DISABLED. Publication to PyPI is on hold until the pipeline reads live GitHub pull
+# requests instead of local fixtures. GitHub only registers workflows ending in .yml or
+# .yaml, so the `.disabled` suffix means no trigger here can fire — not the `release:
+# published` one, not the manual dispatch. To re-enable: `git mv` it back to publish.yml
+# and complete the one-time Trusted Publishing setup described below.
+#
 # Trusted Publishing (OIDC): the pypi/testpypi environments are registered as
 # pending publishers on (test.)pypi.org — no API tokens stored in the repo.
 # One-time setup, on each of pypi.org and test.pypi.org: Publishing -> add a GitHub
