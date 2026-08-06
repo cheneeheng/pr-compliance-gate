@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
+
+from pydantic import BaseModel
+
+from gate.graph import state
 from gate.graph.state import (
     EscalationRecord,
     Finding,
@@ -53,3 +58,17 @@ def test_initial_state_carries_ids_and_nothing_else() -> None:
     assert (state.pr_id, state.thread_id) == ("001_docs_typo", "thread-1")
     assert state.loop_count == 0
     assert state.verdict is None and state.route is None
+
+
+def test_the_checkpoint_allowlist_covers_every_type_in_this_module() -> None:
+    """A domain type missing from the allowlist deserializes with a warning today and will be
+    refused outright by a future LangGraph. Fail here instead, when the type is added."""
+    defined = {
+        name
+        for name, obj in vars(state).items()
+        if isinstance(obj, type)
+        and obj.__module__ == state.__name__
+        and issubclass(obj, BaseModel | StrEnum)
+    }
+    assert {name for _module, name in state.CHECKPOINT_ALLOWLIST} == defined
+    assert {module for module, _name in state.CHECKPOINT_ALLOWLIST} == {state.__name__}

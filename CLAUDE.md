@@ -147,6 +147,17 @@ this survives process restarts.
   deliberate for the single-user demo — do not add CORS middleware.
 - Checkpointed sub-values may deserialize as **either dicts or Pydantic instances** — code that
   reads `snapshot.values` (e.g. `list_reviews`) must handle both.
+- **Checkpoint allowlist**: LangGraph's msgpack deserializer only reconstructs types on an
+  allowlist. Unregistered ones warn today (`Deserializing unregistered type …`) and the library
+  says it will refuse them in a future version — at which point state comes back as a bare dict
+  instead of the model. So **every checkpointer is wrapped**:
+  `compile_graph(saver.with_allowlist(CHECKPOINT_ALLOWLIST))`, in `api/app.py` and
+  `examples/demo.py` alike. `CHECKPOINT_ALLOWLIST` (bottom of `graph/state.py`) names every model
+  and `StrEnum` in that module, deliberately spelled out rather than derived from `vars()` — an
+  allowlist is a security boundary and should be readable. **Adding a type to `state.py` means
+  adding it there too**; `test_state.py::test_the_checkpoint_allowlist_covers_every_type_in_this_module`
+  fails if you forget, which is the cheap version of finding out at runtime. Verify a change with
+  `LANGGRAPH_STRICT_MSGPACK=true`, which turns the future behavior on now.
 
 ## Toolchain rules (from pyproject.toml)
 

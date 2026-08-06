@@ -32,7 +32,7 @@ from langgraph.types import Command
 
 from gate.config import get_settings
 from gate.graph.build import compile_graph
-from gate.graph.state import initial_state
+from gate.graph.state import CHECKPOINT_ALLOWLIST, initial_state
 from gate.intake.loader import load_pr
 from gate.logging import configure_logging
 
@@ -170,8 +170,8 @@ async def _run(only: str | None) -> int:
         print(f"unknown PR id {only!r}; choose one of: {ids}", file=sys.stderr)
         return 1
 
-    async with AsyncSqliteSaver.from_conn_string(":memory:") as checkpointer:
-        graph = compile_graph(checkpointer)
+    async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+        graph = compile_graph(saver.with_allowlist(CHECKPOINT_ALLOWLIST))
         for pr_id, demonstrates, decisions in beats:
             title = load_pr(pr_id).title
             values = await _drive(graph, pr_id, decisions)

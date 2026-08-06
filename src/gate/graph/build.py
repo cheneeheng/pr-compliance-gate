@@ -14,14 +14,14 @@ Flow:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langgraph.graph import END, START, StateGraph
 
 from gate.config import get_settings
 
 if TYPE_CHECKING:
-    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+    from langgraph.checkpoint.base import BaseCheckpointSaver
     from langgraph.graph.state import CompiledStateGraph
 from gate.graph.nodes.classify import classify
 from gate.graph.nodes.human_gate import human_gate
@@ -105,5 +105,6 @@ def build_graph_builder() -> StateGraph[ReviewState]:
     return builder
 
 
-def compile_graph(checkpointer: AsyncSqliteSaver) -> CompiledStateGraph[ReviewState]:
+# Any saver: `.with_allowlist()` returns a BaseCheckpointSaver clone, not the concrete class.
+def compile_graph(checkpointer: BaseCheckpointSaver[Any]) -> CompiledStateGraph[ReviewState]:
     return build_graph_builder().compile(checkpointer=checkpointer)

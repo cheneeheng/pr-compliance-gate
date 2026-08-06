@@ -27,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `Deserializing unregistered type …` warnings on every checkpoint read. Each checkpointer now
+  declares the project's own state types via `saver.with_allowlist(CHECKPOINT_ALLOWLIST)`.
+  LangGraph warns on unregistered types today and says it will refuse them in a future version,
+  which would return bare dicts where models are expected; verified under
+  `LANGGRAPH_STRICT_MSGPACK=true`, where the allowlisted saver round-trips a full `ReviewState`
+  and an unwrapped one does not.
 - Specialists failing with a `ValidationError` once an effort was set. An effort turns on
   adaptive thinking, and the API rejects a forced tool call while thinking is on, so
   `with_structured_output`'s default `function_calling` method quietly lost its guarantee and the

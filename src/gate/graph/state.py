@@ -196,3 +196,31 @@ class ReviewState(BaseModel):
 def initial_state(pr_id: str, thread_id: str) -> ReviewState:
     """Build the starting state for a new review run."""
     return ReviewState(pr_id=pr_id, thread_id=thread_id)
+
+
+# Every domain type that can reach a checkpoint, declared for LangGraph's msgpack allowlist.
+# LangGraph deserializes unregistered types with a warning today and will block them in a future
+# version, so each checkpointer is wrapped in `.with_allowlist(CHECKPOINT_ALLOWLIST)`. Kept
+# explicit rather than derived from `vars()`: an allowlist is a security boundary and is worth
+# reading at a glance. `test_state.py` fails if this drifts from the module.
+CHECKPOINT_ALLOWLIST: tuple[tuple[str, str], ...] = tuple(
+    (__name__, _name)
+    for _name in (
+        "ChangeType",
+        "RiskLevel",
+        "Specialty",
+        "Severity",
+        "EscalationReason",
+        "DecisionAction",
+        "Outcome",
+        "PolicyChunk",
+        "Classification",
+        "RiskAssessment",
+        "Finding",
+        "InvestigationReport",
+        "EscalationRecord",
+        "HumanDecision",
+        "Verdict",
+        "ReviewState",
+    )
+)
