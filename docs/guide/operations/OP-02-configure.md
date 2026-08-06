@@ -26,21 +26,31 @@ same directory every time or set absolute paths.
 
 ## Models
 
+Each tier is a pair: a model id, and the reasoning effort sent with it.
+
 | Var | Default | Purpose |
 |---|---|---|
 | `GATE_MODEL_CLASSIFIER` | `claude-haiku-4-5` | The cheap tier: classification and risk scoring. Every review pays for this. |
+| `GATE_MODEL_CLASSIFIER_EFFORT` | `high` | Effort for that tier. Inert while the tier is Haiku (see below). |
 | `GATE_MODEL_SPECIALIST` | `claude-sonnet-5` | The security and license specialists. Only reviews above the risk threshold pay for this. |
+| `GATE_MODEL_SPECIALIST_EFFORT` | `high` | Effort for that tier. |
 | `GATE_MODEL_INVESTIGATOR` | `claude-sonnet-5` | The autonomous sub-agent. Only investigations pay for this. |
-| `GATE_MODEL_EFFORT` | `high` | How much reasoning a model spends per call: `low`, `medium`, `high`, `xhigh`, or `max`. Anything outside that set fails at startup. Lowering it is the cheapest way to cut spend after the risk gate; raising it costs more on every call above the gate. |
+| `GATE_MODEL_INVESTIGATOR_EFFORT` | `high` | Effort for that tier, applied to both the sub-agent's tool loop and its final summarizing turn. |
 | `GATE_EMBED_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Local embedding model for policy retrieval. Runs on your machine; no API spend. Changing it requires re-running ingestion. |
 
 > **Warning:** the model ids are defaults, not guarantees. Verify each exists on your account
 > before a real run; an invalid id fails at call time, mid-review.
 
-`GATE_MODEL_EFFORT` reaches only the tiers that accept it — Sonnet, Opus, and Fable. A model id
-containing `haiku` is never sent an effort setting, because Haiku has no effort control and the
-API rejects the call. That test is on the configured id, so a Haiku model under any of the three
-`GATE_MODEL_*` settings is covered, and pointing a tier at Sonnet opts it in automatically.
+An effort is one of `low`, `medium`, `high`, `xhigh`, or `max` — how much reasoning the model
+spends per call. Anything outside that set fails at startup rather than mid-review. Lowering the
+specialist and investigator efforts is the cheapest way to cut spend above the risk gate; raising
+them costs more on every call that gets past it.
+
+Effort reaches only the tiers that accept it — Sonnet, Opus, and Fable. A model id containing
+`haiku` is never sent one, because Haiku has no effort control and the API rejects the call. That
+test is on the configured id, not on the tier, so a tier pointed at Haiku is covered wherever it
+appears, and pointing one at Sonnet opts it in automatically. This is why the classifier's effort
+is inert at its default: lower the model to Haiku and the setting simply does not apply.
 
 One side effect worth knowing: an effort setting turns on adaptive thinking, and the API pairs
 that with its own default temperature. The effort-carrying tiers therefore no longer run at

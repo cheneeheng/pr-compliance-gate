@@ -9,9 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `GATE_MODEL_EFFORT` — reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`, default
-  `high`) for the tiers that accept one. It is withheld from any model id containing `haiku`,
-  which has no effort control and rejects the parameter.
+- `GATE_MODEL_CLASSIFIER_EFFORT`, `GATE_MODEL_SPECIALIST_EFFORT`, and
+  `GATE_MODEL_INVESTIGATOR_EFFORT` — reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`,
+  default `high`) paired with each tier's model. Withheld from any model id containing `haiku`,
+  which has no effort control and rejects the parameter. The investigator's effort applies to
+  both its Agent SDK tool loop and its final summarizing turn.
 - A glossary in the user and operator guide, and a `Documentation` section in the README linking
   to it.
 

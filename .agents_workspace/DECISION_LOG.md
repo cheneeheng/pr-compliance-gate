@@ -374,4 +374,9 @@ default suite makes no API calls, so this was checked only at the point where th
 is built. `claude-sonnet-5` pricing in `PRICE_TABLE` was carried over from `claude-sonnet-4-6`
 unverified; it matches the existing fallback, so the displayed estimate is unchanged either way.
 
-**Outcome:** 105 tests pass at 100% coverage; `mypy --strict` and `ruff` clean. No live-API run.
+**Outcome:** 105 tests pass at 100% coverage; `mypy --strict` and `ruff` clean. No live-API
+run. Decisions (2) and (3) were **superseded on 2026-08-06 by explicit user instruction**:
+effort is now per tier (`GATE_MODEL_<TIER>_EFFORT`, paired with `GATE_MODEL_<TIER>`), and
+the Agent SDK tool loop carries the investigator tier's effort via `ClaudeAgentOptions`.
+Decision (1), the temperature handling, still stands and is still unverified against the
+live API.

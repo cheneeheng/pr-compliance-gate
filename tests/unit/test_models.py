@@ -12,6 +12,7 @@ from gate.llm.models import (
     _FALLBACK_PRICE,
     PRICE_TABLE,
     classifier_model,
+    effort_for,
     estimate_cost,
     investigator_model,
     specialist_model,
@@ -24,7 +25,9 @@ _SETTINGS = Settings(
     gate_model_classifier="claude-haiku-4-5",
     gate_model_specialist="claude-sonnet-5",
     gate_model_investigator="claude-sonnet-5",
-    gate_model_effort="high",
+    gate_model_classifier_effort="low",
+    gate_model_specialist_effort="high",
+    gate_model_investigator_effort="max",
 )
 
 
@@ -34,15 +37,19 @@ def test_each_tier_uses_its_configured_model() -> None:
     assert investigator_model(_SETTINGS).model == _SETTINGS.gate_model_investigator
 
 
-def test_effort_reaches_the_sonnet_tiers_but_never_haiku() -> None:
+def test_each_tier_carries_its_own_effort() -> None:
+    assert specialist_model(_SETTINGS).reasoning_effort == "high"
+    assert investigator_model(_SETTINGS).reasoning_effort == "max"
+
+
+def test_effort_never_reaches_haiku() -> None:
     # Haiku has no effort control; sending one is an API error, so it must stay unset there --
     # and temperature stays pinned, since only an effort setting forces the API default.
-    cheap = classifier_model(_SETTINGS)
+    cheap = classifier_model(_SETTINGS)  # configured "low", but the tier is Haiku
     assert cheap.reasoning_effort is None
     assert cheap.temperature == 0.0
 
     for tier in (specialist_model(_SETTINGS), investigator_model(_SETTINGS)):
-        assert tier.reasoning_effort == "high"
         assert tier.temperature is None
 
 
@@ -51,6 +58,7 @@ def test_effort_follows_the_configured_id_not_the_tier() -> None:
     # factory was called.
     settings = _SETTINGS.model_copy(update={"gate_model_specialist": "claude-haiku-4-5"})
     assert specialist_model(settings).reasoning_effort is None
+    assert effort_for("claude-opus-5", "xhigh") == "xhigh"
 
 
 def test_the_cheap_tier_gets_a_smaller_output_budget() -> None:

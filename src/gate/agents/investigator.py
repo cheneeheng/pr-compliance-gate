@@ -29,7 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from gate.config import Settings
 from gate.graph.state import DecisionAction, InvestigationReport, ReviewState
-from gate.llm.models import estimate_cost, investigator_model, structured_call
+from gate.llm.models import effort_for, estimate_cost, investigator_model, structured_call
 from gate.llm.prompts import investigator_system
 from gate.logging import get_logger
 from gate.paths import repo_snapshot_dir
@@ -257,6 +257,9 @@ async def run_investigation(state: ReviewState, settings: Settings) -> Investiga
     try:
         options = ClaudeAgentOptions(
             model=settings.gate_model_investigator,
+            effort=effort_for(
+                settings.gate_model_investigator, settings.gate_model_investigator_effort
+            ),
             system_prompt=_system_prompt(settings),
             mcp_servers={_SERVER_NAME: _make_server(root, tracker)},
             allowed_tools=_ALLOWED_TOOLS,

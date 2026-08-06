@@ -15,6 +15,7 @@ import pytest
 from gate.agents.investigator import _InvestigationAnswer, run_investigation
 from gate.config import get_settings
 from gate.graph.state import Finding, ReviewState, Severity, Specialty
+from gate.llm.models import effort_for
 
 _PR_ID = "003_auth_change"  # the one fixture with a real repo snapshot to read
 
@@ -82,6 +83,10 @@ async def test_harness_owns_the_metrics_and_the_model_owns_the_prose(
     prompt, options = query.seen  # type: ignore[attr-defined]
     assert "is the signature check still enforced?" in prompt
     assert options.max_turns == get_settings().gate_investigator_max_turns
+    # The tool loop carries the investigator tier's own effort, resolved against its model id.
+    assert options.effort == effort_for(
+        get_settings().gate_model_investigator, get_settings().gate_model_investigator_effort
+    )
 
 
 async def test_an_sdk_failure_comes_back_as_an_inconclusive_report(

@@ -12,7 +12,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
-from gate.config import Settings, get_settings
+from gate.config import ModelEffort, Settings, get_settings
 
 # Static per-model price table, USD per 1M tokens (input, output). An ESTIMATE for the demo's
 # cost display — not billing truth. Keyed by the env-configured model id; unknown ids fall back
@@ -24,22 +24,29 @@ PRICE_TABLE: dict[str, tuple[float, float]] = {
 _FALLBACK_PRICE: tuple[float, float] = (3.00, 15.00)
 
 
-def _supports_effort(model_id: str) -> bool:
-    """Whether a tier takes a reasoning-effort setting. Sonnet/Opus/Fable do; Haiku does not,
-    and sending it there is an API error — so the id is matched, not assumed."""
-    return "haiku" not in model_id.lower()
+def effort_for(model_id: str, effort: ModelEffort) -> ModelEffort | None:
+    """The effort to send alongside ``model_id``, or ``None`` where the tier takes none.
+
+    Sonnet/Opus/Fable accept a reasoning-effort setting; Haiku has no effort control and the API
+    rejects the parameter, so the configured id is matched rather than the tier assumed — a tier
+    pointed at Haiku is covered wherever it appears. Shared with the Agent SDK loop, which passes
+    the same value as ``ClaudeAgentOptions.effort``.
+    """
+    return None if "haiku" in model_id.lower() else effort
 
 
-def _chat(model_id: str, settings: Settings, *, max_tokens: int) -> ChatAnthropic:
-    effort = settings.gate_model_effort if _supports_effort(model_id) else None
+def _chat(
+    model_id: str, settings: Settings, *, max_tokens: int, effort: ModelEffort
+) -> ChatAnthropic:
+    resolved = effort_for(model_id, effort)
     return ChatAnthropic(
         model=model_id,  # langchain-anthropic aliases model->model_name
         api_key=settings.anthropic_api_key or None,
         # An effort setting turns on adaptive thinking, which the API pairs with its own default
         # temperature; pinning temperature=0 is only safe on the tiers that take no effort.
-        temperature=None if effort else 0.0,
+        temperature=None if resolved else 0.0,
         max_tokens=max_tokens,
-        reasoning_effort=effort,
+        reasoning_effort=resolved,
         timeout=None,
         stop=None,
     )
@@ -47,17 +54,32 @@ def _chat(model_id: str, settings: Settings, *, max_tokens: int) -> ChatAnthropi
 
 def classifier_model(settings: Settings | None = None) -> ChatAnthropic:
     settings = settings or get_settings()
-    return _chat(settings.gate_model_classifier, settings, max_tokens=1024)
+    return _chat(
+        settings.gate_model_classifier,
+        settings,
+        max_tokens=1024,
+        effort=settings.gate_model_classifier_effort,
+    )
 
 
 def specialist_model(settings: Settings | None = None) -> ChatAnthropic:
     settings = settings or get_settings()
-    return _chat(settings.gate_model_specialist, settings, max_tokens=2048)
+    return _chat(
+        settings.gate_model_specialist,
+        settings,
+        max_tokens=2048,
+        effort=settings.gate_model_specialist_effort,
+    )
 
 
 def investigator_model(settings: Settings | None = None) -> ChatAnthropic:
     settings = settings or get_settings()
-    return _chat(settings.gate_model_investigator, settings, max_tokens=2048)
+    return _chat(
+        settings.gate_model_investigator,
+        settings,
+        max_tokens=2048,
+        effort=settings.gate_model_investigator_effort,
+    )
 
 
 async def structured_call[T: BaseModel](
