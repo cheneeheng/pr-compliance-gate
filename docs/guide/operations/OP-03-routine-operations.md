@@ -1,7 +1,7 @@
-# 22 — Routine operations
+# OP-03 — Routine operations
 
 Everything here assumes a shell in the repository root and a completed
-[installation](20-install.md).
+[installation](OP-01-install.md).
 
 ## Start and stop the service
 

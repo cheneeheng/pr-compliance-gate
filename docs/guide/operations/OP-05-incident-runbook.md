@@ -1,4 +1,4 @@
-# 24 — Incident runbook
+# OP-05 — Incident runbook
 
 One entry per failure mode: detection, diagnosis, remediation, verification.
 
@@ -86,7 +86,7 @@ limiting, run fewer reviews concurrently.
 | anything else | An SDK or API error; the text is the underlying exception. Cross-check `investigation_error` in the log. |
 
 **Remediation:** add the `repo/` snapshot (see
-[`22-routine-operations.md`](22-routine-operations.md)); or raise
+[`OP-03-routine-operations.md`](OP-03-routine-operations.md)); or raise
 `GATE_INVESTIGATOR_MAX_TURNS` / `GATE_INVESTIGATOR_MAX_TOOL_CALLS`; or address the API error.
 Restart after any `.env` change.
 
@@ -116,16 +116,25 @@ review of `002_new_dependency` produces a license finding citing a `LIC-` id.
 
 ---
 
-## `422 fixture … ` when starting a review
+## `422` when starting a review
 
-**Detection:** the UI banner reads `Failed to start review: fixture …`; the log has a `gate_error`
-line with `status=422`.
+**Detection:** the UI banner reads `Failed to start review: …`; the log has a `gate_error` line
+with `status=422`.
 
-**Diagnosis:** the message names the defect exactly — `missing meta.json or diff.patch`,
-`has invalid meta.json`, or `diff.patch has no parseable file headers`.
+**Diagnosis:** the message names the defect exactly:
+
+| Message | Cause |
+|---|---|
+| `fixture <id> missing meta.json or diff.patch` | One of the two required files is absent. |
+| `fixture <id> has invalid meta.json: …` | The JSON does not parse; the decoder's own message follows. A *missing* `pr_id` or `title` does not raise — both fall back to the directory name. |
+| `fixture <id> diff.patch has no parseable file headers` | The patch contains no `diff --git a/… b/…` line. |
+| `invalid sample PR id '…'` | The id is not a plain directory name. The loader rejects path separators and `..` before touching the filesystem, so a fixture can never be read from outside `data/sample_prs/`. |
+| `no sample PR fixture named '…'` | The id is well-formed but no such directory exists — usually renamed or deleted after the page loaded. |
 
 **Remediation:** repair the fixture directory. A fixture with no `diff --git a/… b/…` header in
-its patch is always rejected — that is where the changed-file list comes from.
+its patch is always rejected — that is where the changed-file list comes from. An
+`invalid sample PR id` is not a fixture defect: rename the directory to a plain name matching
+`[A-Za-z0-9_-]+` and start the review by that name.
 
 **Verify:** the fixture appears in `curl http://127.0.0.1:8000/api/prs` and starts without a
 banner. Note that a malformed fixture is silently omitted from that list, so its absence is itself
@@ -161,7 +170,7 @@ A review that was paused at the human gate can still be resumed by posting to
 - **Corrupt vector store:** delete `.chroma/` and re-ingest. It holds only derived data.
 - **Corrupt or unwanted checkpoint database:** stop the server, move `checkpoints.db` aside (do
   not delete it until you are sure), restart. See the warning in
-  [`22-routine-operations.md`](22-routine-operations.md) — the blast radius is all review history,
+  [`OP-03-routine-operations.md`](OP-03-routine-operations.md) — the blast radius is all review history,
   including reviews paused at the human gate.
 - **Bad code deployment:** stop the server, `git checkout` the last known-good revision,
   `uv sync`, restart. Checkpoints written by a prior revision may not deserialize under an

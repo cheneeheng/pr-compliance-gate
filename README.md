@@ -38,6 +38,12 @@ Either way, `checkpoints.db` and `.chroma/` are written into the current working
 
 The FastAPI app serves the UI same-origin — no CORS, no auth: a single-user local demo.
 
+## Documentation
+
+[`docs/guide/`](docs/guide/index.md) is the user and operator guide: getting started and the
+review workflow for reviewers, and installation, configuration, monitoring, and an incident
+runbook for operators.
+
 ## Pipeline
 
 ```mermaid

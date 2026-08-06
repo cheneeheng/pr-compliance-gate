@@ -1,4 +1,4 @@
-# 10 — How to review a pull request
+# HT-01 — How to review a pull request
 
 **When:** you want a policy review of one of the available sample PRs.
 **Prerequisites:** the server is running and reachable at <http://127.0.0.1:8000>.
@@ -16,7 +16,7 @@ investigation run.
 
 **If it fails:** a banner reading `Failed to start review: fixture … missing meta.json or
 diff.patch` means the fixture on disk is incomplete — that is an operator fix, see
-[`../operations/22-routine-operations.md`](../operations/22-routine-operations.md).
+[`../operations/OP-03-routine-operations.md`](../operations/OP-03-routine-operations.md).
 
 ## Read the result
 
@@ -75,7 +75,7 @@ Present only when the review was escalated. The reason is one of:
 ### Verdict
 
 The terminal outcome — `approved`, `rejected`, or `auto_approved` — with a rationale. See
-[`13-read-a-verdict.md`](13-read-a-verdict.md).
+[`HT-04-read-a-verdict.md`](HT-04-read-a-verdict.md).
 
 ## Watch progress
 
@@ -87,4 +87,4 @@ The terminal outcome — `approved`, `rejected`, or `auto_approved` — with a r
 **Verify:** the badge eventually reaches `done` (or `awaiting_human`, waiting on you).
 
 **If it fails:** a review stuck on `running` for minutes is an operator issue — see
-[`../operations/24-incident-runbook.md`](../operations/24-incident-runbook.md).
+[`../operations/OP-05-incident-runbook.md`](../operations/OP-05-incident-runbook.md).

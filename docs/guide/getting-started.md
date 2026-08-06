@@ -1,11 +1,11 @@
-# 01 — Getting started
+# Getting started
 
 Goal: complete one review end to end and see a verdict, in about five minutes.
 
 ## Before you begin
 
 - The server is installed and running. If it is not, ask your operator, or follow
-  [`operations/20-install.md`](operations/20-install.md) yourself.
+  [`operations/OP-01-install.md`](operations/OP-01-install.md) yourself.
 - You can open <http://127.0.0.1:8000> in a browser.
 - The policy corpus has been ingested at least once (an install step). Without it, reviews still
   run but cite no policy excerpts.
@@ -43,7 +43,7 @@ There is no login. Anyone who can reach the page can start and decide reviews.
 your review is listed with status `done` and its risk level.
 
 **If it fails:** a red banner at the top of the page names the error. See
-[`30-troubleshooting.md`](30-troubleshooting.md); the two most common causes are a missing
+[`troubleshooting.md`](troubleshooting.md); the two most common causes are a missing
 `ANTHROPIC_API_KEY` and a policy corpus that was never ingested.
 
 ## What you just exercised
@@ -60,7 +60,7 @@ finishes at `auto_approved` without ever invoking a specialist.
 
 ## Next
 
-- [`how-to/10-review-a-pull-request.md`](how-to/10-review-a-pull-request.md) — every panel
+- [`how-to/HT-01-review-a-pull-request.md`](how-to/HT-01-review-a-pull-request.md) — every panel
   explained.
-- [`how-to/11-decide-at-the-human-gate.md`](how-to/11-decide-at-the-human-gate.md) — choosing
+- [`how-to/HT-02-decide-at-the-human-gate.md`](how-to/HT-02-decide-at-the-human-gate.md) — choosing
   between the three decisions.

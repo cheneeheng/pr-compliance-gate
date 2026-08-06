@@ -1,4 +1,4 @@
-# 21 — Configuration
+# OP-02 — Configuration
 
 All configuration is environment-driven, read from `.env` in the working directory or from the
 process environment. Settings are loaded **once per process** and cached — every change requires a
@@ -19,6 +19,7 @@ Check a setting actually took effect by observing behaviour, not by trusting the
 |---|---|---|
 | `GATE_DB_PATH` | `checkpoints.db` | SQLite checkpoint file. Deleting it loses every review's history and any review paused at the human gate. |
 | `GATE_CHROMA_DIR` | `.chroma` | Chroma persistence directory for the policy corpus. Safe to delete — re-create it by re-running ingestion. |
+| `POLICY_COLLECTION` | `policies` | Name of the Chroma collection holding the policy chunks. Note it carries no `GATE_` prefix. Changing it points the app at a different collection inside the same directory — the old one is left behind, and retrieval returns nothing until you re-run ingestion under the new name. |
 
 Both paths are resolved relative to the process working directory, so start the server from the
 same directory every time or set absolute paths.

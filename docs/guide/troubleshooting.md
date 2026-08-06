@@ -1,7 +1,7 @@
-# 30 — Troubleshooting (reviewer)
+# Troubleshooting (reviewer)
 
 Symptoms you can see in the browser, and what to do about them. Anything requiring a shell belongs
-to your operator — see [`operations/24-incident-runbook.md`](operations/24-incident-runbook.md).
+to your operator — see [`operations/OP-05-incident-runbook.md`](operations/OP-05-incident-runbook.md).
 
 | Symptom | Likely cause | What to do |
 |---|---|---|
@@ -10,6 +10,9 @@ to your operator — see [`operations/24-incident-runbook.md`](operations/24-inc
 | A PR you expect is missing from the dropdown | That fixture failed to parse and was skipped silently. | Operator issue: the fixture needs `meta.json`, `diff.patch`, and at least one `diff --git` header. |
 | Banner: `Failed to start review: fixture …` | The fixture is incomplete or malformed. | Operator issue; the message names the defect. |
 | Banner: `Failed to start review: no sample PR fixture named '…'` | The fixture was renamed or removed after the page loaded. | Reload the page to refresh the dropdown. |
+| Banner: `Failed to start review: invalid sample PR id '…'` | The id is not a plain directory name — it contains a path separator or other rejected character. Cannot happen from the dropdown; you get it by calling the API by hand. | Use the id exactly as the dropdown supplies it. If a fixture on disk is named this way, it is an operator fix. |
+| Banner: `Review not found.` and the page stops updating | The review is not in the checkpoint store — usually a stale link, or the checkpoint database was reset. | Click **← Reviews** and start the review again. Polling has stopped, so reloading alone will not revive the page. |
+| Banner: `Connection issue: …` on an open review | A poll failed — the server restarted, or the network dropped. | Nothing to do; polling continues and the banner clears on the next successful poll. If it persists, the server is down — tell your operator. |
 | Status stays `running` for more than a few minutes | The pipeline is slow, or the background run failed. | Reload once. If still `running`, ask your operator to check the log for `graph_run_error`. |
 | Banner: `Already decided — refreshing.` | The decision was already submitted — a double-click or a second tab. | Nothing to do; the page refreshes to the current state. |
 | Banner: `Decision failed: …` | The submission did not reach the server. | The buttons re-enable. Retry once. If it fails again, report the message. |

@@ -1,9 +1,9 @@
-# 12 — How to run the demo script
+# HT-03 — How to run the demo script
 
 **When:** you want to see all three demo reviews end to end, narrated, without clicking through
 the UI — for a walkthrough, a recording, or a smoke test of a real configuration.
 **Prerequisites:** a shell in the repository root; `uv sync` done; `ANTHROPIC_API_KEY` set in
-`.env`; the policy corpus ingested. See [`../operations/20-install.md`](../operations/20-install.md).
+`.env`; the policy corpus ingested. See [`../operations/OP-01-install.md`](../operations/OP-01-install.md).
 **Time / impact:** a few minutes. **This makes real Anthropic API calls and costs money.** It
 needs no server — it drives the pipeline in-process with an in-memory checkpoint store, and the
 human decisions are scripted.
@@ -36,10 +36,10 @@ human decisions are scripted.
 
 **If it fails:** an authentication error means `ANTHROPIC_API_KEY` is unset or invalid; a run with
 no policy citations means the corpus was never ingested. Both are covered in
-[`../operations/24-incident-runbook.md`](../operations/24-incident-runbook.md).
+[`../operations/OP-05-incident-runbook.md`](../operations/OP-05-incident-runbook.md).
 
 ## Related
 
 The same three fixtures can be driven through the UI instead — start at
-[`10-review-a-pull-request.md`](10-review-a-pull-request.md). The UI path lets you make the human
+[`HT-01-review-a-pull-request.md`](HT-01-review-a-pull-request.md). The UI path lets you make the human
 decisions yourself; the demo script scripts them.
