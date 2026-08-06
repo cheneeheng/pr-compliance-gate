@@ -19,17 +19,27 @@ from gate.config import Settings, get_settings
 # to the specialist tier so a cost is always shown.
 PRICE_TABLE: dict[str, tuple[float, float]] = {
     "claude-haiku-4-5": (1.00, 5.00),
-    "claude-sonnet-4-6": (3.00, 15.00),
+    "claude-sonnet-5": (3.00, 15.00),
 }
 _FALLBACK_PRICE: tuple[float, float] = (3.00, 15.00)
 
 
+def _supports_effort(model_id: str) -> bool:
+    """Whether a tier takes a reasoning-effort setting. Sonnet/Opus/Fable do; Haiku does not,
+    and sending it there is an API error — so the id is matched, not assumed."""
+    return "haiku" not in model_id.lower()
+
+
 def _chat(model_id: str, settings: Settings, *, max_tokens: int) -> ChatAnthropic:
+    effort = settings.gate_model_effort if _supports_effort(model_id) else None
     return ChatAnthropic(
         model=model_id,  # langchain-anthropic aliases model->model_name
         api_key=settings.anthropic_api_key or None,
-        temperature=0.0,
+        # An effort setting turns on adaptive thinking, which the API pairs with its own default
+        # temperature; pinning temperature=0 is only safe on the tiers that take no effort.
+        temperature=None if effort else 0.0,
         max_tokens=max_tokens,
+        reasoning_effort=effort,
         timeout=None,
         stop=None,
     )

@@ -341,3 +341,37 @@ disabled outright. Done by renaming it to `publish.yml.disabled`: GitHub registe
 the triggers (a workflow with no `on:` is invalid YAML for Actions), and over `gh workflow disable`
 (that state lives in the GitHub UI, not the repo, so it would not survive a fork or a re-clone and
 would be invisible in review).
+
+---
+
+### Entry 14
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-06T00:00:00Z
+**Task:** Expose reasoning effort as an env var, withheld from Haiku; move to Sonnet 5.
+
+**Context:** Three forks the request left open. (1) `langchain-anthropic` turns on adaptive
+thinking whenever `reasoning_effort` is set on a model whose profile declares `xhigh` — Sonnet 5
+does — and it passes `temperature` straight through. `_chat` pinned `temperature=0.0`, and a
+non-default temperature alongside thinking is the combination the API has historically rejected.
+(2) Effort could be one global knob or one per tier. (3) `ClaudeAgentOptions` also takes an
+`effort` field, so the investigator's Agent SDK loop could carry the same setting.
+
+**Decision:** (1) Send no temperature when effort is applied, letting the API use its default,
+and keep `temperature=0.0` on the tiers that take no effort. Disabling thinking instead would
+have preserved determinism but reduced effort to an output-token cap, defeating the point of the
+setting. (2) One `GATE_MODEL_EFFORT`, keyed on the configured model id rather than on the tier,
+so pointing any tier at Haiku withholds it and pointing any tier at Sonnet opts it in — a single
+knob matches the request and the id test needs no table of model families. (3) Applied to the
+chat-model factory only, which is what was asked; the Agent SDK loop is a different API surface
+and stays untouched pending a decision.
+
+**Impact / Risk:** Specialist and investigator wording is no longer reproducible run to run,
+because those tiers now run at the API default temperature. Routing is unaffected — `reconcile`
+is plain code. The effort-plus-temperature behaviour is **unverified against the live API**: the
+default suite makes no API calls, so this was checked only at the point where the request payload
+is built. `claude-sonnet-5` pricing in `PRICE_TABLE` was carried over from `claude-sonnet-4-6`
+unverified; it matches the existing fallback, so the displayed estimate is unchanged either way.
+
+**Outcome:** 105 tests pass at 100% coverage; `mypy --strict` and `ruff` clean. No live-API run.

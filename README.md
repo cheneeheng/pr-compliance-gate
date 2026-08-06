@@ -124,6 +124,7 @@ All configuration is env-driven (see `.env.example`). Notable knobs:
 | `GATE_SPECIALIST_TIMEOUT_S` | per-specialist timeout; on timeout the review escalates, never hangs |
 | `GATE_INVESTIGATOR_MAX_TURNS` / `_MAX_TOOL_CALLS` / `_MAX_FILE_CHARS` | investigator hard budgets |
 | `GATE_MODEL_*` | model per tier (Haiku for the cheap gate, Sonnet for specialists/investigator) |
+| `GATE_MODEL_EFFORT` | reasoning effort (`low`…`max`) for the Sonnet/Opus/Fable tiers; never sent to Haiku |
 
 Model ids in `.env.example` are env-overridable defaults — verify them against the live
 Anthropic API before a real run.

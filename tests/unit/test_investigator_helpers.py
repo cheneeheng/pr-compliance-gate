@@ -25,7 +25,7 @@ from gate.graph.state import (
 )
 
 _SETTINGS = Settings(
-    gate_model_investigator="claude-sonnet-4-6",
+    gate_model_investigator="claude-sonnet-5",
     gate_investigator_max_turns=8,
     gate_investigator_max_tool_calls=15,
 )

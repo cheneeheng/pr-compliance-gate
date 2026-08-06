@@ -22,8 +22,9 @@ from gate.llm.models import (
 _SETTINGS = Settings(
     anthropic_api_key="test-key",
     gate_model_classifier="claude-haiku-4-5",
-    gate_model_specialist="claude-sonnet-4-6",
-    gate_model_investigator="claude-sonnet-4-6",
+    gate_model_specialist="claude-sonnet-5",
+    gate_model_investigator="claude-sonnet-5",
+    gate_model_effort="high",
 )
 
 
@@ -31,6 +32,25 @@ def test_each_tier_uses_its_configured_model() -> None:
     assert classifier_model(_SETTINGS).model == _SETTINGS.gate_model_classifier
     assert specialist_model(_SETTINGS).model == _SETTINGS.gate_model_specialist
     assert investigator_model(_SETTINGS).model == _SETTINGS.gate_model_investigator
+
+
+def test_effort_reaches_the_sonnet_tiers_but_never_haiku() -> None:
+    # Haiku has no effort control; sending one is an API error, so it must stay unset there --
+    # and temperature stays pinned, since only an effort setting forces the API default.
+    cheap = classifier_model(_SETTINGS)
+    assert cheap.reasoning_effort is None
+    assert cheap.temperature == 0.0
+
+    for tier in (specialist_model(_SETTINGS), investigator_model(_SETTINGS)):
+        assert tier.reasoning_effort == "high"
+        assert tier.temperature is None
+
+
+def test_effort_follows_the_configured_id_not_the_tier() -> None:
+    # Point the specialist tier at Haiku: the withholding is keyed on the id, not on which
+    # factory was called.
+    settings = _SETTINGS.model_copy(update={"gate_model_specialist": "claude-haiku-4-5"})
+    assert specialist_model(settings).reasoning_effort is None
 
 
 def test_the_cheap_tier_gets_a_smaller_output_budget() -> None:

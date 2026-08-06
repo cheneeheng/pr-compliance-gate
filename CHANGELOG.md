@@ -5,6 +5,34 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `GATE_MODEL_EFFORT` — reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`, default
+  `high`) for the tiers that accept one. It is withheld from any model id containing `haiku`,
+  which has no effort control and rejects the parameter.
+- A glossary in the user and operator guide, and a `Documentation` section in the README linking
+  to it.
+
+### Changed
+
+- Default specialist and investigator model is now `claude-sonnet-5` (was `claude-sonnet-4-6`).
+- The effort-carrying tiers no longer pin `temperature=0`: an effort setting turns on adaptive
+  thinking, which the API pairs with its own default temperature. Haiku tiers are unchanged.
+- Guide pages renamed to per-folder `HT-01`…`HT-04` and `OP-01`…`OP-05` prefixes, with the root
+  pages unnumbered and `index.md` as the entry point.
+
+### Fixed
+
+- Documented `POLICY_COLLECTION`, which was absent from both the configuration reference and
+  `.env.example`.
+- The incident runbook now lists all five fixture-rejection messages, including
+  `invalid sample PR id`, and corrects two descriptions: the id pattern permits hyphens, and an
+  invalid `meta.json` is a JSON parse failure only.
+- Added the `Review not found.`, `Connection issue: …`, and invalid-id banners to the reviewer
+  troubleshooting table.
+
 ## [0.1.1] - 2026-07-27
 
 Packaging, licensing, and release automation only — no functional change to the pipeline.

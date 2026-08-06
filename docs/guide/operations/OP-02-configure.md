@@ -29,12 +29,24 @@ same directory every time or set absolute paths.
 | Var | Default | Purpose |
 |---|---|---|
 | `GATE_MODEL_CLASSIFIER` | `claude-haiku-4-5` | The cheap tier: classification and risk scoring. Every review pays for this. |
-| `GATE_MODEL_SPECIALIST` | `claude-sonnet-4-6` | The security and license specialists. Only reviews above the risk threshold pay for this. |
-| `GATE_MODEL_INVESTIGATOR` | `claude-sonnet-4-6` | The autonomous sub-agent. Only investigations pay for this. |
+| `GATE_MODEL_SPECIALIST` | `claude-sonnet-5` | The security and license specialists. Only reviews above the risk threshold pay for this. |
+| `GATE_MODEL_INVESTIGATOR` | `claude-sonnet-5` | The autonomous sub-agent. Only investigations pay for this. |
+| `GATE_MODEL_EFFORT` | `high` | How much reasoning a model spends per call: `low`, `medium`, `high`, `xhigh`, or `max`. Anything outside that set fails at startup. Lowering it is the cheapest way to cut spend after the risk gate; raising it costs more on every call above the gate. |
 | `GATE_EMBED_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Local embedding model for policy retrieval. Runs on your machine; no API spend. Changing it requires re-running ingestion. |
 
 > **Warning:** the model ids are defaults, not guarantees. Verify each exists on your account
 > before a real run; an invalid id fails at call time, mid-review.
+
+`GATE_MODEL_EFFORT` reaches only the tiers that accept it — Sonnet, Opus, and Fable. A model id
+containing `haiku` is never sent an effort setting, because Haiku has no effort control and the
+API rejects the call. That test is on the configured id, so a Haiku model under any of the three
+`GATE_MODEL_*` settings is covered, and pointing a tier at Sonnet opts it in automatically.
+
+One side effect worth knowing: an effort setting turns on adaptive thinking, and the API pairs
+that with its own default temperature. The effort-carrying tiers therefore no longer run at
+temperature 0, so repeated reviews of one fixture can word their findings differently. Haiku
+tiers keep temperature 0. This affects wording, not the routing rules — `reconcile` is plain
+code.
 
 ## The risk gate
 
