@@ -8,7 +8,7 @@ Everything here assumes a shell in the repository root and a completed
 Start:
 
 ```bash
-uv run uvicorn gate.api.app:app --reload
+uv run uvicorn gate.api.app:app
 ```
 
 Stop: `Ctrl+C`. Log line `app_stopped` confirms clean shutdown.

@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gets a serializer constructed with the project's state types (`use_state_allowlist`, in the new
   `graph/checkpoint.py`). LangGraph warns on unregistered types today and says it will refuse
   them in a future version, which would return bare dicts where models are expected.
+- Every investigation failing under the documented start command with
+  `Failed to start Claude Code:` and no further detail. `uvicorn --reload` forces a
+  `SelectorEventLoop`, which cannot spawn the subprocess the Agent SDK needs and raises an
+  empty `NotImplementedError`. `--reload` is gone from every documented command, and the
+  investigator now preflights the loop and reports the cause instead of the empty message.
 - The investigator running unauthenticated. The Claude Code CLI that the Agent SDK spawns
   inherits `os.environ`, but `pydantic-settings` reads `ANTHROPIC_API_KEY` from `.env` without
   ever setting it there, so the sub-agent — alone among the components — received no credentials.

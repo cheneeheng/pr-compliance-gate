@@ -14,6 +14,8 @@ extraction below is duck-typed on purpose to tolerate minor surface drift.
 
 from __future__ import annotations
 
+import asyncio
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -238,6 +240,20 @@ async def _summarize(
     )
 
 
+def _loop_can_spawn_subprocess() -> bool:
+    """Whether the running loop can start the CLI the SDK drives.
+
+    Windows' ``SelectorEventLoop`` cannot: it raises a bare ``NotImplementedError`` whose message
+    is empty, which the SDK reports as ``Failed to start Claude Code:`` with nothing after it.
+    ``uvicorn --reload`` selects exactly that loop (``uvicorn/loops/asyncio.py``, where
+    ``use_subprocess`` — set by ``--reload`` — forces ``SelectorEventLoop`` even on Windows), so
+    the recommended dev command used to disable the investigator with an unreadable error.
+    """
+    if sys.platform != "win32":
+        return True
+    return not isinstance(asyncio.get_running_loop(), asyncio.SelectorEventLoop)
+
+
 async def run_investigation(state: ReviewState, settings: Settings) -> InvestigationReport:
     """Run the bounded agent loop and return a report. Never raises into the graph."""
     root = repo_snapshot_dir(state.pr_id).resolve()
@@ -248,6 +264,15 @@ async def run_investigation(state: ReviewState, settings: Settings) -> Investiga
     if not root.is_dir():
         return InvestigationReport(
             summary=f"investigation inconclusive: no repo snapshot for {state.pr_id}"
+        )
+    if not _loop_can_spawn_subprocess():
+        return InvestigationReport(
+            summary=(
+                "investigation inconclusive: this event loop cannot spawn a subprocess, so the "
+                "Claude Code CLI the Agent SDK drives cannot start. On Windows, `uvicorn "
+                "--reload` selects a SelectorEventLoop, which has no subprocess support. Restart "
+                "the server without `--reload`."
+            )
         )
 
     questions = _open_questions(state)

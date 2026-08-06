@@ -90,10 +90,13 @@ directory), then follow steps 4–5 with every `uv run` prefix dropped.
 5. Start the server:
 
    ```bash
-   uv run uvicorn gate.api.app:app --reload
+   uv run uvicorn gate.api.app:app
    ```
 
-   Drop `--reload` outside development.
+   > **Warning:** do not add `--reload`. It makes uvicorn pick an event loop that cannot spawn a
+   > subprocess on Windows, and the investigator drives the Claude Code CLI as a subprocess — so
+   > every investigation would come back inconclusive. Nothing else in the pipeline is affected,
+   > which is what makes it confusing to diagnose.
 
 ## Post-install health check
 

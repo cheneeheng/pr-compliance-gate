@@ -97,7 +97,7 @@ absolute paths are rejected by the sandbox; it has no write, network, or shell a
 3. Start it again:
 
    ```bash
-   uv run uvicorn gate.api.app:app --reload
+   uv run uvicorn gate.api.app:app
    ```
 
 4. Start a review and confirm the new behaviour — for example, after raising

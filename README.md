@@ -26,7 +26,7 @@ uv sync --extra dev                       # install, including dev tooling
 uv run pre-commit install                 # ruff check + format on commit (once per clone)
 cp .env.example .env                      # then set ANTHROPIC_API_KEY
 uv run python -m gate.intake.ingest       # embed the policy corpus into Chroma (one-time)
-uv run uvicorn gate.api.app:app --reload  # serve the API + UI on http://127.0.0.1:8000
+uv run uvicorn gate.api.app:app           # serve the API + UI on http://127.0.0.1:8000
 ```
 
 `uv build` produces a wheel that installs and runs the same way (`python -m gate.intake.ingest`,
@@ -35,6 +35,10 @@ packaging is exercised, just not published.
 
 Either way, `checkpoints.db` and `.chroma/` are written into the current working directory
 (override with `GATE_DB_PATH` / `GATE_CHROMA_DIR`).
+
+Do not add `--reload` on Windows. It makes uvicorn select a `SelectorEventLoop`, which cannot
+spawn a subprocess — and the investigator drives the Claude Code CLI as one, so it would fail on
+every investigation.
 
 The FastAPI app serves the UI same-origin — no CORS, no auth: a single-user local demo.
 

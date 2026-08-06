@@ -6,6 +6,9 @@ so these tests pin the shapes the harness must tolerate.
 
 from __future__ import annotations
 
+import pytest
+
+from gate.agents import investigator
 from gate.agents.investigator import (
     _build_prompt,
     _extract_cost,
@@ -126,3 +129,12 @@ def test_message_text_reads_both_known_shapes() -> None:
     assert _message_text(_Result(result="final answer")) == "final answer"
     assert _message_text(_Result(content=[_Block("a"), _Block(""), _Block("b")])) == "a\nb"
     assert _message_text(_Result()) == ""
+
+
+def test_only_windows_selector_loops_are_treated_as_subprocess_incapable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """POSIX SelectorEventLoops spawn subprocesses fine -- uvicorn uses one by default there, so
+    the check must key on the platform too, not the loop class alone."""
+    monkeypatch.setattr(investigator.sys, "platform", "linux")
+    assert investigator._loop_can_spawn_subprocess() is True
