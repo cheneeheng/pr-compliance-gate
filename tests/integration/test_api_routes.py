@@ -118,6 +118,16 @@ def test_an_unknown_thread_is_a_404_everywhere() -> None:
         assert client.get("/api/reviews/ghost/pending").status_code == 404
 
 
+def test_a_started_review_reads_as_running_before_its_first_checkpoint() -> None:
+    """The graph runs in the background, so the UI can poll before any checkpoint exists. A 404
+    there stops the page polling and strands the review -- report it as running instead."""
+    with _client_with(_FakeGraph(_Snapshot({}))) as client:
+        thread_id = client.post("/api/reviews", json={"pr_id": "001_docs_typo"}).json()["thread_id"]
+        body = client.get(f"/api/reviews/{thread_id}").json()
+
+    assert body == {"status": "running", "thread_id": thread_id, "pr_id": "001_docs_typo"}
+
+
 def test_pending_returns_the_review_packet_or_204() -> None:
     with _client_with(_FakeGraph(_Snapshot({"pr_id": "t"}, interrupted=True))) as client:
         response = client.get("/api/reviews/abc/pending")

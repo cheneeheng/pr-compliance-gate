@@ -264,6 +264,14 @@ async def run_investigation(state: ReviewState, settings: Settings) -> Investiga
             mcp_servers={_SERVER_NAME: _make_server(root, tracker)},
             allowed_tools=_ALLOWED_TOOLS,
             max_turns=settings.gate_investigator_max_turns,
+            # The SDK spawns the Claude Code CLI, which inherits os.environ -- and the key is
+            # read from .env by pydantic-settings, which never touches os.environ. Without this
+            # the sub-agent is the one component running unauthenticated.
+            env=(
+                {"ANTHROPIC_API_KEY": settings.anthropic_api_key}
+                if settings.anthropic_api_key
+                else {}
+            ),
         )
         async for message in query(prompt=prompt, options=options):
             text = _message_text(message)

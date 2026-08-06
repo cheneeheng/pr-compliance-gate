@@ -151,13 +151,23 @@ this survives process restarts.
   allowlist. Unregistered ones warn today (`Deserializing unregistered type …`) and the library
   says it will refuse them in a future version — at which point state comes back as a bare dict
   instead of the model. So **every checkpointer is wrapped**:
-  `compile_graph(saver.with_allowlist(CHECKPOINT_ALLOWLIST))`, in `api/app.py` and
-  `examples/demo.py` alike. `CHECKPOINT_ALLOWLIST` (bottom of `graph/state.py`) names every model
-  and `StrEnum` in that module, deliberately spelled out rather than derived from `vars()` — an
-  allowlist is a security boundary and should be readable. **Adding a type to `state.py` means
-  adding it there too**; `test_state.py::test_the_checkpoint_allowlist_covers_every_type_in_this_module`
-  fails if you forget, which is the cheap version of finding out at runtime. Verify a change with
-  `LANGGRAPH_STRICT_MSGPACK=true`, which turns the future behavior on now.
+  `compile_graph(use_state_allowlist(saver))`, in `api/app.py` and `examples/demo.py` alike.
+  `use_state_allowlist` (`graph/checkpoint.py`) *constructs* a `JsonPlusSerializer` with the
+  allowlist. Do **not** reach for `saver.with_allowlist(...)`: it merges into the existing
+  allowlist, and the default allowlist is the sentinel `True`, so merging is a silent no-op that
+  returns the saver unchanged — it appears to work and fixes nothing unless
+  `LANGGRAPH_STRICT_MSGPACK=true` is set, which is exactly how the trap gets past a test.
+  `CHECKPOINT_ALLOWLIST` (bottom of `graph/state.py`) names every model and `StrEnum` in that
+  module, deliberately spelled out rather than derived from `vars()` — an allowlist is a security
+  boundary and should be readable. **Adding a type to `state.py` means adding it there too**;
+  `test_state.py::test_the_checkpoint_allowlist_covers_every_type_in_this_module` fails if you
+  forget. `tests/integration/test_checkpoint_allowlist.py` asserts the round trip warns nothing
+  and that undeclared types are refused — assert on both, since only the second catches a no-op.
+- **The Agent SDK subprocess does not inherit the API key.** `pydantic-settings` reads `.env`
+  into `Settings`; it never writes `os.environ`. The Claude Code CLI the SDK spawns inherits
+  `os.environ`, so the investigator must pass credentials explicitly via `ClaudeAgentOptions.env`
+  (`agents/investigator.py`). Everything else gets the key as an argument, which is why a missing
+  key shows up *only* as a failing investigation.
 
 ## Toolchain rules (from pyproject.toml)
 

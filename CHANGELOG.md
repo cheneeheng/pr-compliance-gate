@@ -28,11 +28,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `Deserializing unregistered type …` warnings on every checkpoint read. Each checkpointer now
-  declares the project's own state types via `saver.with_allowlist(CHECKPOINT_ALLOWLIST)`.
-  LangGraph warns on unregistered types today and says it will refuse them in a future version,
-  which would return bare dicts where models are expected; verified under
-  `LANGGRAPH_STRICT_MSGPACK=true`, where the allowlisted saver round-trips a full `ReviewState`
-  and an unwrapped one does not.
+  gets a serializer constructed with the project's state types (`use_state_allowlist`, in the new
+  `graph/checkpoint.py`). LangGraph warns on unregistered types today and says it will refuse
+  them in a future version, which would return bare dicts where models are expected.
+- The investigator running unauthenticated. The Claude Code CLI that the Agent SDK spawns
+  inherits `os.environ`, but `pydantic-settings` reads `ANTHROPIC_API_KEY` from `.env` without
+  ever setting it there, so the sub-agent — alone among the components — received no credentials.
+  It is now passed explicitly via `ClaudeAgentOptions.env`.
+- The first review after a server start failing with `Review not found.` in the UI. A review is
+  registered before its background run writes a checkpoint, and the page polls immediately; the
+  404 stopped polling and stranded it. A known thread now reads as `running` until its first
+  checkpoint exists.
 - Specialists failing with a `ValidationError` once an effort was set. An effort turns on
   adaptive thinking, and the API rejects a forced tool call while thinking is on, so
   `with_structured_output`'s default `function_calling` method quietly lost its guarantee and the

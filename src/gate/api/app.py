@@ -24,7 +24,7 @@ from gate.errors import (
     ReviewNotFoundError,
 )
 from gate.graph.build import compile_graph
-from gate.graph.state import CHECKPOINT_ALLOWLIST
+from gate.graph.checkpoint import use_state_allowlist
 from gate.logging import configure_logging, get_logger, set_correlation_id
 
 log = get_logger(__name__)
@@ -45,9 +45,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.reviews = OrderedDict()
     app.state.bg_tasks = set()
     async with AsyncSqliteSaver.from_conn_string(str(settings.gate_db_path)) as saver:
-        # Declare our own state types: LangGraph warns on unregistered ones today and will
-        # refuse to deserialize them in a future version.
-        app.state.graph = compile_graph(saver.with_allowlist(CHECKPOINT_ALLOWLIST))
+        app.state.graph = compile_graph(use_state_allowlist(saver))
         log.info("app_started", db=str(settings.gate_db_path))
         yield
     log.info("app_stopped")

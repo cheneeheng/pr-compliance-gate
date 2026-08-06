@@ -83,6 +83,8 @@ limiting, run fewer reviews concurrently.
 |---|---|
 | `no repo snapshot for <pr_id>` | The fixture has no `repo/` directory. The sub-agent has nothing to read. |
 | `no answer produced` | The tool loop ran but never produced a final structured answer — usually a turn budget too small for the question. |
+| `Claude Code not found` | The Agent SDK could not locate the `claude` CLI. It runs the investigator as a subprocess, so the CLI must be installed and on the `PATH` of the account running the server — not merely on your interactive shell's `PATH`. |
+| `Failed to start Claude Code: …` | The CLI was found but the subprocess did not come up. The trailing text is the underlying error; an authentication failure here means the key never reached the subprocess. |
 | anything else | An SDK or API error; the text is the underlying exception. Cross-check `investigation_error` in the log. |
 
 **Remediation:** add the `repo/` snapshot (see

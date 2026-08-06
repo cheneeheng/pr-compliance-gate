@@ -112,7 +112,13 @@ async def get_review(thread_id: str, request: Request) -> dict[str, Any]:
     snapshot = await request.app.state.graph.aget_state(_config(thread_id))
     values = snapshot.values or {}
     if not values:
-        raise ReviewNotFoundError(f"no review for thread {thread_id}")
+        # A review is registered before its background run writes the first checkpoint, and the
+        # UI polls as soon as POST returns. Report a known thread as running rather than 404 --
+        # the page stops polling on a 404, so the race would strand the very first review.
+        pr_id = request.app.state.reviews.get(thread_id)
+        if pr_id is None:
+            raise ReviewNotFoundError(f"no review for thread {thread_id}")
+        return {"status": "running", "thread_id": thread_id, "pr_id": pr_id}
     return {"status": _derive_status(values, snapshot), **values}
 
 
