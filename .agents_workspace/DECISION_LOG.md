@@ -380,3 +380,35 @@ effort is now per tier (`GATE_MODEL_<TIER>_EFFORT`, paired with `GATE_MODEL_<TIE
 the Agent SDK tool loop carries the investigator tier's effort via `ClaudeAgentOptions`.
 Decision (1), the temperature handling, still stands and is still unverified against the
 live API.
+
+---
+
+### Entry 15
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-06T00:00:00Z
+**Task:** Fix the specialist `ValidationError` introduced by the effort setting.
+
+**Context:** With an effort set, `security_specialist` failed with
+`_FindingList.findings: Input should be a valid list, input_value='{"findings": []}'`. Cause, from
+`langchain_anthropic/chat_models.py`: an effort turns on adaptive thinking; the API rejects
+`tool_choice` that forces tool use while thinking is on, so `with_structured_output`'s default
+`function_calling` method drops the forcing (line 2025 and
+`_get_llm_for_structured_output_when_thinking_is_enabled`) and the model is free to answer in
+prose. The parser then fed the raw JSON text into the schema's single field.
+
+**Decision:** Select the structured-output method from the effort: `json_schema` (Claude's
+dedicated structured output, which thinking does not restrict) when an effort is set, and the
+existing `function_calling` otherwise. Rejected two alternatives. Sending
+`thinking={"type": "disabled"}` would have restored the forced tool call and temperature 0, but
+reduces effort to an output-token cap and defeats the setting. Switching every tier to
+`json_schema` would have changed the Haiku path too, which works today and whose structured-output
+support I cannot verify without a live call.
+
+**Impact / Risk:** Haiku tiers are byte-for-byte unchanged. `json_schema` on `claude-sonnet-5` is
+**unverified against the live API** — it is the documented path for that model, but the default
+suite makes no API calls, so this was checked only at the point where the method is selected. If
+it fails, the fallback is to disable thinking as described above.
+
+**Outcome:** 107 tests pass at 100% coverage; `mypy --strict` and `ruff` clean.

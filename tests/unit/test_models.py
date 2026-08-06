@@ -82,12 +82,15 @@ class _Structured:
 
 
 class _Model:
-    def __init__(self) -> None:
+    def __init__(self, reasoning_effort: str | None = None) -> None:
         self.structured = _Structured()
         self.schema: Any = None
+        self.method: Any = None
+        self.reasoning_effort = reasoning_effort
 
-    def with_structured_output(self, schema: Any) -> _Structured:
+    def with_structured_output(self, schema: Any, method: str) -> _Structured:
         self.schema = schema
+        self.method = method
         return self.structured
 
 
@@ -102,6 +105,18 @@ async def test_structured_call_owns_message_assembly() -> None:
     assert isinstance(system, SystemMessage) and system.content == "SYSTEM"
     assert isinstance(user, HumanMessage) and user.content == "USER"
     assert result.change_type == "docs"
+
+
+async def test_an_effort_model_takes_the_structured_output_path_thinking_allows() -> None:
+    # Forcing a tool call is rejected while thinking is on, and an effort turns thinking on, so
+    # those tiers must not rely on function_calling -- the model would answer in prose instead.
+    effortful = _Model(reasoning_effort="high")
+    await structured_call(effortful, Classification, "SYSTEM", "USER")  # type: ignore[arg-type]
+    assert effortful.method == "json_schema"
+
+    plain = _Model()
+    await structured_call(plain, Classification, "SYSTEM", "USER")  # type: ignore[arg-type]
+    assert plain.method == "function_calling"
 
 
 def test_estimate_cost_uses_the_price_table_then_the_fallback() -> None:

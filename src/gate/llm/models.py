@@ -8,6 +8,8 @@ and no node ever constructs raw messages itself.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
@@ -85,8 +87,19 @@ def investigator_model(settings: Settings | None = None) -> ChatAnthropic:
 async def structured_call[T: BaseModel](
     model: ChatAnthropic, schema: type[T], system: str, user: str
 ) -> T:
-    """Invoke ``model`` for a single structured-output turn. Owns message construction."""
-    structured = model.with_structured_output(schema)
+    """Invoke ``model`` for a single structured-output turn. Owns message construction.
+
+    The structured-output method follows the effort setting. An effort turns on adaptive
+    thinking, and the API refuses to force a tool call while thinking is on — so the default
+    ``function_calling`` method silently loses its guarantee there and the model is free to
+    answer in prose, which surfaces as a validation error on the schema. Claude's dedicated
+    structured output carries no such restriction. Tiers without an effort keep
+    ``function_calling``, which needs no support beyond tool use.
+    """
+    method: Literal["function_calling", "json_schema"] = (
+        "json_schema" if model.reasoning_effort else "function_calling"
+    )
+    structured = model.with_structured_output(schema, method=method)
     result = await structured.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
     return result  # type: ignore[return-value]  # with_structured_output returns schema instance
 

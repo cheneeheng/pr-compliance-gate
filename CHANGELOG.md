@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Specialists failing with a `ValidationError` once an effort was set. An effort turns on
+  adaptive thinking, and the API rejects a forced tool call while thinking is on, so
+  `with_structured_output`'s default `function_calling` method quietly lost its guarantee and the
+  model could answer in prose. Effort-carrying tiers now use Claude's dedicated structured output
+  (`json_schema`); tiers without an effort keep `function_calling`.
 - Documented `POLICY_COLLECTION`, which was absent from both the configuration reference and
   `.env.example`.
 - The incident runbook now lists all five fixture-rejection messages, including
