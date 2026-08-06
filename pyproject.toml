@@ -1,6 +1,6 @@
 [project]
 name = "pr-compliance-gate"
-version = "0.1.1"
+version = "0.1.2"
 description = "A LangGraph + Claude Agent SDK pipeline that reviews pull requests against security, licensing, and data-handling policy before merge — cost-gated, human-in-the-loop."
 readme = "README.md"
 requires-python = ">=3.12"
