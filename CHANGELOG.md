@@ -5,6 +5,61 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-08-06
+
+Per-tier reasoning effort, a move to Sonnet 5, and the fixes that fell out of running the
+pipeline for real — including two that silently disabled the investigator.
+
+### Added
+
+- `GATE_MODEL_CLASSIFIER_EFFORT`, `GATE_MODEL_SPECIALIST_EFFORT`, and
+  `GATE_MODEL_INVESTIGATOR_EFFORT` — reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`,
+  default `high`) paired with each tier's model. Withheld from any model id containing `haiku`,
+  which has no effort control and rejects the parameter. The investigator's effort applies to
+  both its Agent SDK tool loop and its final summarizing turn.
+- A glossary in the user and operator guide, and a `Documentation` section in the README linking
+  to it.
+
+### Changed
+
+- Default specialist and investigator model is now `claude-sonnet-5` (was `claude-sonnet-4-6`).
+- The effort-carrying tiers no longer pin `temperature=0`: an effort setting turns on adaptive
+  thinking, which the API pairs with its own default temperature. Haiku tiers are unchanged.
+- Guide pages renamed to per-folder `HT-01`…`HT-04` and `OP-01`…`OP-05` prefixes, with the root
+  pages unnumbered and `index.md` as the entry point.
+
+### Fixed
+
+- `Deserializing unregistered type …` warnings on every checkpoint read. Each checkpointer now
+  gets a serializer constructed with the project's state types (`use_state_allowlist`, in the new
+  `graph/checkpoint.py`). LangGraph warns on unregistered types today and says it will refuse
+  them in a future version, which would return bare dicts where models are expected.
+- Every investigation failing under the documented start command with
+  `Failed to start Claude Code:` and no further detail. `uvicorn --reload` forces a
+  `SelectorEventLoop`, which cannot spawn the subprocess the Agent SDK needs and raises an
+  empty `NotImplementedError`. `--reload` is gone from every documented command, and the
+  investigator now preflights the loop and reports the cause instead of the empty message.
+- The investigator running unauthenticated. The Claude Code CLI that the Agent SDK spawns
+  inherits `os.environ`, but `pydantic-settings` reads `ANTHROPIC_API_KEY` from `.env` without
+  ever setting it there, so the sub-agent — alone among the components — received no credentials.
+  It is now passed explicitly via `ClaudeAgentOptions.env`.
+- The first review after a server start failing with `Review not found.` in the UI. A review is
+  registered before its background run writes a checkpoint, and the page polls immediately; the
+  404 stopped polling and stranded it. A known thread now reads as `running` until its first
+  checkpoint exists.
+- Specialists failing with a `ValidationError` once an effort was set. An effort turns on
+  adaptive thinking, and the API rejects a forced tool call while thinking is on, so
+  `with_structured_output`'s default `function_calling` method quietly lost its guarantee and the
+  model could answer in prose. Effort-carrying tiers now use Claude's dedicated structured output
+  (`json_schema`); tiers without an effort keep `function_calling`.
+- Documented `POLICY_COLLECTION`, which was absent from both the configuration reference and
+  `.env.example`.
+- The incident runbook now lists all five fixture-rejection messages, including
+  `invalid sample PR id`, and corrects two descriptions: the id pattern permits hyphens, and an
+  invalid `meta.json` is a JSON parse failure only.
+- Added the `Review not found.`, `Connection issue: …`, and invalid-id banners to the reviewer
+  troubleshooting table.
+
 ## [0.1.1] - 2026-07-27
 
 Packaging, licensing, and release automation only — no functional change to the pipeline.

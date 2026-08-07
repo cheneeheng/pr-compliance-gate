@@ -1,14 +1,14 @@
-# 22 — Routine operations
+# OP-03 — Routine operations
 
 Everything here assumes a shell in the repository root and a completed
-[installation](20-install.md).
+[installation](OP-01-install.md).
 
 ## Start and stop the service
 
 Start:
 
 ```bash
-uv run uvicorn gate.api.app:app --reload
+uv run uvicorn gate.api.app:app
 ```
 
 Stop: `Ctrl+C`. Log line `app_stopped` confirms clean shutdown.

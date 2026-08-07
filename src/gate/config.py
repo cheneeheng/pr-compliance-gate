@@ -9,8 +9,14 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Reasoning effort, a closed set the API accepts. Each model tier carries its own, paired with
+# the model id it applies to. Sonnet/Opus/Fable take it; Haiku has no effort control, so
+# :func:`gate.llm.models.effort_for` withholds it there.
+ModelEffort = Literal["low", "medium", "high", "xhigh", "max"]
 
 
 class Settings(BaseSettings):
@@ -27,8 +33,11 @@ class Settings(BaseSettings):
 
     # Model tiers
     gate_model_classifier: str = "claude-haiku-4-5"
-    gate_model_specialist: str = "claude-sonnet-4-6"
-    gate_model_investigator: str = "claude-sonnet-4-6"
+    gate_model_classifier_effort: ModelEffort = "high"
+    gate_model_specialist: str = "claude-sonnet-5"
+    gate_model_specialist_effort: ModelEffort = "high"
+    gate_model_investigator: str = "claude-sonnet-5"
+    gate_model_investigator_effort: ModelEffort = "high"
     gate_embed_model: str = "sentence-transformers/all-MiniLM-L6-v2"
 
     # Risk gate + orchestration budgets

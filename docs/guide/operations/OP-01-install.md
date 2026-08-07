@@ -1,4 +1,4 @@
-# 20 — Installation
+# OP-01 — Installation
 
 Stand up the service on a single machine and verify it is healthy.
 
@@ -66,7 +66,7 @@ directory), then follow steps 4–5 with every `uv run` prefix dropped.
    ```
 
    > **Warning:** `.env` holds a live credential. It must never be committed. Review every other
-   > setting in [`21-configure.md`](21-configure.md) before a real run — in particular, confirm
+   > setting in [`OP-02-configure.md`](OP-02-configure.md) before a real run — in particular, confirm
    > the `GATE_MODEL_*` ids exist on the live API, since they are only defaults.
 
 4. Ingest the policy corpus into Chroma. This is a one-time step, repeated only when
@@ -85,15 +85,18 @@ directory), then follow steps 4–5 with every `uv run` prefix dropped.
    Seven is the count for the corpus shipped in `data/policies/` (three files, seven `##`
    policy headings). Any count above zero is fine. A count of `0` means no
    policy heading matched the expected `SEC-01`-style id format — see
-   [`24-incident-runbook.md`](24-incident-runbook.md).
+   [`OP-05-incident-runbook.md`](OP-05-incident-runbook.md).
 
 5. Start the server:
 
    ```bash
-   uv run uvicorn gate.api.app:app --reload
+   uv run uvicorn gate.api.app:app
    ```
 
-   Drop `--reload` outside development.
+   > **Warning:** do not add `--reload`. It makes uvicorn pick an event loop that cannot spawn a
+   > subprocess on Windows, and the investigator drives the Claude Code CLI as a subprocess — so
+   > every investigation would come back inconclusive. Nothing else in the pipeline is affected,
+   > which is what makes it confusing to diagnose.
 
 ## Post-install health check
 
@@ -123,11 +126,11 @@ directory), then follow steps 4–5 with every `uv run` prefix dropped.
 **Verify:** step 4 produced an `auto_approved` verdict, and `checkpoints.db` now exists in the
 working directory.
 
-**If it fails:** see [`24-incident-runbook.md`](24-incident-runbook.md). The most common
+**If it fails:** see [`OP-05-incident-runbook.md`](OP-05-incident-runbook.md). The most common
 first-run failures are an unset `ANTHROPIC_API_KEY` and a model id that does not exist on the
 account.
 
 ## Next
 
-- [`21-configure.md`](21-configure.md) — tune the gates and budgets.
-- [`22-routine-operations.md`](22-routine-operations.md) — day-to-day tasks.
+- [`OP-02-configure.md`](OP-02-configure.md) — tune the gates and budgets.
+- [`OP-03-routine-operations.md`](OP-03-routine-operations.md) — day-to-day tasks.

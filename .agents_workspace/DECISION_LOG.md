@@ -341,3 +341,101 @@ disabled outright. Done by renaming it to `publish.yml.disabled`: GitHub registe
 the triggers (a workflow with no `on:` is invalid YAML for Actions), and over `gh workflow disable`
 (that state lives in the GitHub UI, not the repo, so it would not survive a fork or a re-clone and
 would be invisible in review).
+
+---
+
+### Entry 14
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-06T00:00:00Z
+**Task:** Expose reasoning effort as an env var, withheld from Haiku; move to Sonnet 5.
+
+**Context:** Three forks the request left open. (1) `langchain-anthropic` turns on adaptive
+thinking whenever `reasoning_effort` is set on a model whose profile declares `xhigh` — Sonnet 5
+does — and it passes `temperature` straight through. `_chat` pinned `temperature=0.0`, and a
+non-default temperature alongside thinking is the combination the API has historically rejected.
+(2) Effort could be one global knob or one per tier. (3) `ClaudeAgentOptions` also takes an
+`effort` field, so the investigator's Agent SDK loop could carry the same setting.
+
+**Decision:** (1) Send no temperature when effort is applied, letting the API use its default,
+and keep `temperature=0.0` on the tiers that take no effort. Disabling thinking instead would
+have preserved determinism but reduced effort to an output-token cap, defeating the point of the
+setting. (2) One `GATE_MODEL_EFFORT`, keyed on the configured model id rather than on the tier,
+so pointing any tier at Haiku withholds it and pointing any tier at Sonnet opts it in — a single
+knob matches the request and the id test needs no table of model families. (3) Applied to the
+chat-model factory only, which is what was asked; the Agent SDK loop is a different API surface
+and stays untouched pending a decision.
+
+**Impact / Risk:** Specialist and investigator wording is no longer reproducible run to run,
+because those tiers now run at the API default temperature. Routing is unaffected — `reconcile`
+is plain code. The effort-plus-temperature behaviour is **unverified against the live API**: the
+default suite makes no API calls, so this was checked only at the point where the request payload
+is built. `claude-sonnet-5` pricing in `PRICE_TABLE` was carried over from `claude-sonnet-4-6`
+unverified; it matches the existing fallback, so the displayed estimate is unchanged either way.
+
+**Outcome:** 105 tests pass at 100% coverage; `mypy --strict` and `ruff` clean. No live-API
+run. Decisions (2) and (3) were **superseded on 2026-08-06 by explicit user instruction**:
+effort is now per tier (`GATE_MODEL_<TIER>_EFFORT`, paired with `GATE_MODEL_<TIER>`), and
+the Agent SDK tool loop carries the investigator tier's effort via `ClaudeAgentOptions`.
+Decision (1), the temperature handling, still stands and is still unverified against the
+live API.
+
+---
+
+### Entry 15
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-06T00:00:00Z
+**Task:** Fix the specialist `ValidationError` introduced by the effort setting.
+
+**Context:** With an effort set, `security_specialist` failed with
+`_FindingList.findings: Input should be a valid list, input_value='{"findings": []}'`. Cause, from
+`langchain_anthropic/chat_models.py`: an effort turns on adaptive thinking; the API rejects
+`tool_choice` that forces tool use while thinking is on, so `with_structured_output`'s default
+`function_calling` method drops the forcing (line 2025 and
+`_get_llm_for_structured_output_when_thinking_is_enabled`) and the model is free to answer in
+prose. The parser then fed the raw JSON text into the schema's single field.
+
+**Decision:** Select the structured-output method from the effort: `json_schema` (Claude's
+dedicated structured output, which thinking does not restrict) when an effort is set, and the
+existing `function_calling` otherwise. Rejected two alternatives. Sending
+`thinking={"type": "disabled"}` would have restored the forced tool call and temperature 0, but
+reduces effort to an output-token cap and defeats the setting. Switching every tier to
+`json_schema` would have changed the Haiku path too, which works today and whose structured-output
+support I cannot verify without a live call.
+
+**Impact / Risk:** Haiku tiers are byte-for-byte unchanged. `json_schema` on `claude-sonnet-5` is
+**unverified against the live API** — it is the documented path for that model, but the default
+suite makes no API calls, so this was checked only at the point where the method is selected. If
+it fails, the fallback is to disable thinking as described above.
+
+**Outcome:** 107 tests pass at 100% coverage; `mypy --strict` and `ruff` clean.
+
+### Entry 16
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-07T00:00:00Z
+**Task:** Green the CI on PR #3 (release v0.1.2), which failed the 100% coverage gate.
+
+**Context:** `uv run pytest --cov` passes at 100% on Windows but reports 99.80% on Linux CI. The
+single missed line is `agents/investigator.py:254`, the `isinstance(loop, SelectorEventLoop)`
+check inside `_loop_can_spawn_subprocess`, which sits behind an early `sys.platform != "win32"`
+return. On Windows the line is reached incidentally by the harness tests; on Linux nothing can
+reach it. Coverage was therefore host-dependent, and the gate only noticed once CI actually ran.
+
+**Decision:** Add a unit test that fakes the platform (`monkeypatch` on `investigator.sys.platform`
+= `"win32"`) and stubs `asyncio.get_running_loop` with a `Mock(spec=asyncio.SelectorEventLoop)`, so
+the win32 branch executes on every host. Rejected `# pragma: no cover` and a coverage exclusion:
+both hide a real branch of a documented platform workaround, and the existing sibling test already
+pins the POSIX direction the same way — this makes the pair symmetric.
+
+**Impact / Risk:** Test-only change; `src/` untouched. The stub asserts on type identity rather
+than real loop behaviour, so it pins the contract of the check, not that a real Windows
+`SelectorEventLoop` fails to spawn — that remains covered only by the comment and the upstream
+uvicorn source cited in the docstring.
+
+**Outcome:** 114 passed, 100% statement and branch coverage locally; ruff check and format clean.
+Not yet confirmed on Linux CI — the fix is uncommitted at the time of writing.

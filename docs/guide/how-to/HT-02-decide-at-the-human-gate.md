@@ -1,4 +1,4 @@
-# 11 — How to decide at the human gate
+# HT-02 — How to decide at the human gate
 
 **When:** a review's status badge reads `awaiting_human` and a **Decision** panel is showing.
 **Prerequisites:** you have read the Findings, Investigation, and Escalation panels for that
@@ -37,7 +37,7 @@ panel is replaced with the new round's result before the review comes back to yo
 - Banner `Already decided — refreshing.` — the decision was already submitted (a double-click, or
   another tab). The page reloads the current state; no action needed.
 - Banner `Decision failed: …` — the buttons re-enable so you can retry. If it keeps failing, see
-  [`../30-troubleshooting.md`](../30-troubleshooting.md).
+  [`../troubleshooting.md`](../troubleshooting.md).
 
 ## Notes on the investigation budget
 

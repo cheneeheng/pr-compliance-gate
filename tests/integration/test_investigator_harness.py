@@ -15,6 +15,7 @@ import pytest
 from gate.agents.investigator import _InvestigationAnswer, run_investigation
 from gate.config import get_settings
 from gate.graph.state import Finding, ReviewState, Severity, Specialty
+from gate.llm.models import effort_for
 
 _PR_ID = "003_auth_change"  # the one fixture with a real repo snapshot to read
 
@@ -82,6 +83,10 @@ async def test_harness_owns_the_metrics_and_the_model_owns_the_prose(
     prompt, options = query.seen  # type: ignore[attr-defined]
     assert "is the signature check still enforced?" in prompt
     assert options.max_turns == get_settings().gate_investigator_max_turns
+    # The tool loop carries the investigator tier's own effort, resolved against its model id.
+    assert options.effort == effort_for(
+        get_settings().gate_model_investigator, get_settings().gate_model_investigator_effort
+    )
 
 
 async def test_an_sdk_failure_comes_back_as_an_inconclusive_report(
@@ -133,3 +138,17 @@ async def test_an_empty_loop_and_a_silent_model_still_produce_a_report(
     monkeypatch.setattr("gate.agents.investigator.structured_call", _empty)
     report = await run_investigation(_state(), get_settings())
     assert report.summary == "investigation inconclusive: no answer produced"
+
+
+async def test_a_loop_without_subprocess_support_is_named_not_guessed_at(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows' SelectorEventLoop cannot spawn the CLI, and the SDK reports that as an empty
+    'Failed to start Claude Code:'. Say what actually happened instead."""
+    monkeypatch.setattr("gate.agents.investigator._loop_can_spawn_subprocess", lambda: False)
+
+    report = await run_investigation(_state(), get_settings())
+
+    assert report.summary.startswith("investigation inconclusive:")
+    assert "--reload" in report.summary
+    assert report.tool_calls_count == 0

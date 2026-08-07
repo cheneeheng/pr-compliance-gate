@@ -12,6 +12,7 @@ from gate.llm.models import (
     _FALLBACK_PRICE,
     PRICE_TABLE,
     classifier_model,
+    effort_for,
     estimate_cost,
     investigator_model,
     specialist_model,
@@ -22,8 +23,11 @@ from gate.llm.models import (
 _SETTINGS = Settings(
     anthropic_api_key="test-key",
     gate_model_classifier="claude-haiku-4-5",
-    gate_model_specialist="claude-sonnet-4-6",
-    gate_model_investigator="claude-sonnet-4-6",
+    gate_model_specialist="claude-sonnet-5",
+    gate_model_investigator="claude-sonnet-5",
+    gate_model_classifier_effort="low",
+    gate_model_specialist_effort="high",
+    gate_model_investigator_effort="max",
 )
 
 
@@ -31,6 +35,30 @@ def test_each_tier_uses_its_configured_model() -> None:
     assert classifier_model(_SETTINGS).model == _SETTINGS.gate_model_classifier
     assert specialist_model(_SETTINGS).model == _SETTINGS.gate_model_specialist
     assert investigator_model(_SETTINGS).model == _SETTINGS.gate_model_investigator
+
+
+def test_each_tier_carries_its_own_effort() -> None:
+    assert specialist_model(_SETTINGS).reasoning_effort == "high"
+    assert investigator_model(_SETTINGS).reasoning_effort == "max"
+
+
+def test_effort_never_reaches_haiku() -> None:
+    # Haiku has no effort control; sending one is an API error, so it must stay unset there --
+    # and temperature stays pinned, since only an effort setting forces the API default.
+    cheap = classifier_model(_SETTINGS)  # configured "low", but the tier is Haiku
+    assert cheap.reasoning_effort is None
+    assert cheap.temperature == 0.0
+
+    for tier in (specialist_model(_SETTINGS), investigator_model(_SETTINGS)):
+        assert tier.temperature is None
+
+
+def test_effort_follows_the_configured_id_not_the_tier() -> None:
+    # Point the specialist tier at Haiku: the withholding is keyed on the id, not on which
+    # factory was called.
+    settings = _SETTINGS.model_copy(update={"gate_model_specialist": "claude-haiku-4-5"})
+    assert specialist_model(settings).reasoning_effort is None
+    assert effort_for("claude-opus-5", "xhigh") == "xhigh"
 
 
 def test_the_cheap_tier_gets_a_smaller_output_budget() -> None:
@@ -54,12 +82,15 @@ class _Structured:
 
 
 class _Model:
-    def __init__(self) -> None:
+    def __init__(self, reasoning_effort: str | None = None) -> None:
         self.structured = _Structured()
         self.schema: Any = None
+        self.method: Any = None
+        self.reasoning_effort = reasoning_effort
 
-    def with_structured_output(self, schema: Any) -> _Structured:
+    def with_structured_output(self, schema: Any, method: str) -> _Structured:
         self.schema = schema
+        self.method = method
         return self.structured
 
 
@@ -74,6 +105,18 @@ async def test_structured_call_owns_message_assembly() -> None:
     assert isinstance(system, SystemMessage) and system.content == "SYSTEM"
     assert isinstance(user, HumanMessage) and user.content == "USER"
     assert result.change_type == "docs"
+
+
+async def test_an_effort_model_takes_the_structured_output_path_thinking_allows() -> None:
+    # Forcing a tool call is rejected while thinking is on, and an effort turns thinking on, so
+    # those tiers must not rely on function_calling -- the model would answer in prose instead.
+    effortful = _Model(reasoning_effort="high")
+    await structured_call(effortful, Classification, "SYSTEM", "USER")  # type: ignore[arg-type]
+    assert effortful.method == "json_schema"
+
+    plain = _Model()
+    await structured_call(plain, Classification, "SYSTEM", "USER")  # type: ignore[arg-type]
+    assert plain.method == "function_calling"
 
 
 def test_estimate_cost_uses_the_price_table_then_the_fallback() -> None:

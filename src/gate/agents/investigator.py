@@ -14,6 +14,8 @@ extraction below is duck-typed on purpose to tolerate minor surface drift.
 
 from __future__ import annotations
 
+import asyncio
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -29,7 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from gate.config import Settings
 from gate.graph.state import DecisionAction, InvestigationReport, ReviewState
-from gate.llm.models import estimate_cost, investigator_model, structured_call
+from gate.llm.models import effort_for, estimate_cost, investigator_model, structured_call
 from gate.llm.prompts import investigator_system
 from gate.logging import get_logger
 from gate.paths import repo_snapshot_dir
@@ -238,6 +240,20 @@ async def _summarize(
     )
 
 
+def _loop_can_spawn_subprocess() -> bool:
+    """Whether the running loop can start the CLI the SDK drives.
+
+    Windows' ``SelectorEventLoop`` cannot: it raises a bare ``NotImplementedError`` whose message
+    is empty, which the SDK reports as ``Failed to start Claude Code:`` with nothing after it.
+    ``uvicorn --reload`` selects exactly that loop (``uvicorn/loops/asyncio.py``, where
+    ``use_subprocess`` — set by ``--reload`` — forces ``SelectorEventLoop`` even on Windows), so
+    the recommended dev command used to disable the investigator with an unreadable error.
+    """
+    if sys.platform != "win32":
+        return True
+    return not isinstance(asyncio.get_running_loop(), asyncio.SelectorEventLoop)
+
+
 async def run_investigation(state: ReviewState, settings: Settings) -> InvestigationReport:
     """Run the bounded agent loop and return a report. Never raises into the graph."""
     root = repo_snapshot_dir(state.pr_id).resolve()
@@ -249,6 +265,15 @@ async def run_investigation(state: ReviewState, settings: Settings) -> Investiga
         return InvestigationReport(
             summary=f"investigation inconclusive: no repo snapshot for {state.pr_id}"
         )
+    if not _loop_can_spawn_subprocess():
+        return InvestigationReport(
+            summary=(
+                "investigation inconclusive: this event loop cannot spawn a subprocess, so the "
+                "Claude Code CLI the Agent SDK drives cannot start. On Windows, `uvicorn "
+                "--reload` selects a SelectorEventLoop, which has no subprocess support. Restart "
+                "the server without `--reload`."
+            )
+        )
 
     questions = _open_questions(state)
     prompt = _build_prompt(state, questions)
@@ -257,10 +282,21 @@ async def run_investigation(state: ReviewState, settings: Settings) -> Investiga
     try:
         options = ClaudeAgentOptions(
             model=settings.gate_model_investigator,
+            effort=effort_for(
+                settings.gate_model_investigator, settings.gate_model_investigator_effort
+            ),
             system_prompt=_system_prompt(settings),
             mcp_servers={_SERVER_NAME: _make_server(root, tracker)},
             allowed_tools=_ALLOWED_TOOLS,
             max_turns=settings.gate_investigator_max_turns,
+            # The SDK spawns the Claude Code CLI, which inherits os.environ -- and the key is
+            # read from .env by pydantic-settings, which never touches os.environ. Without this
+            # the sub-agent is the one component running unauthenticated.
+            env=(
+                {"ANTHROPIC_API_KEY": settings.anthropic_api_key}
+                if settings.anthropic_api_key
+                else {}
+            ),
         )
         async for message in query(prompt=prompt, options=options):
             text = _message_text(message)

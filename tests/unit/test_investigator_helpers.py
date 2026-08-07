@@ -6,6 +6,12 @@ so these tests pin the shapes the harness must tolerate.
 
 from __future__ import annotations
 
+import asyncio
+from unittest.mock import Mock
+
+import pytest
+
+from gate.agents import investigator
 from gate.agents.investigator import (
     _build_prompt,
     _extract_cost,
@@ -25,7 +31,7 @@ from gate.graph.state import (
 )
 
 _SETTINGS = Settings(
-    gate_model_investigator="claude-sonnet-4-6",
+    gate_model_investigator="claude-sonnet-5",
     gate_investigator_max_turns=8,
     gate_investigator_max_tool_calls=15,
 )
@@ -126,3 +132,24 @@ def test_message_text_reads_both_known_shapes() -> None:
     assert _message_text(_Result(result="final answer")) == "final answer"
     assert _message_text(_Result(content=[_Block("a"), _Block(""), _Block("b")])) == "a\nb"
     assert _message_text(_Result()) == ""
+
+
+def test_only_windows_selector_loops_are_treated_as_subprocess_incapable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """POSIX SelectorEventLoops spawn subprocesses fine -- uvicorn uses one by default there, so
+    the check must key on the platform too, not the loop class alone."""
+    monkeypatch.setattr(investigator.sys, "platform", "linux")
+    assert investigator._loop_can_spawn_subprocess() is True
+
+
+def test_windows_selector_loops_are_treated_as_subprocess_incapable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The win32 branch never executes on Linux CI, so fake the platform rather than let coverage
+    of the loop check depend on which OS ran the suite."""
+    monkeypatch.setattr(investigator.sys, "platform", "win32")
+    monkeypatch.setattr(
+        investigator.asyncio, "get_running_loop", lambda: Mock(spec=asyncio.SelectorEventLoop)
+    )
+    assert investigator._loop_can_spawn_subprocess() is False

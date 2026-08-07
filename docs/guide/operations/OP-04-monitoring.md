@@ -1,4 +1,4 @@
-# 23 — Monitoring
+# OP-04 — Monitoring
 
 There is no metrics endpoint, dashboard, or alerting in this build. Monitoring means reading
 structured logs on stdout and the review state exposed by the API.

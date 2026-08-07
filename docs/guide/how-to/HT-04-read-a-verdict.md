@@ -1,4 +1,4 @@
-# 13 — How to read a verdict
+# HT-04 — How to read a verdict
 
 **When:** a review's badge reads `done` and the **Verdict** panel is populated.
 **Prerequisites:** none beyond having the review open.

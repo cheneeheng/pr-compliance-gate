@@ -24,6 +24,7 @@ from gate.errors import (
     ReviewNotFoundError,
 )
 from gate.graph.build import compile_graph
+from gate.graph.checkpoint import use_state_allowlist
 from gate.logging import configure_logging, get_logger, set_correlation_id
 
 log = get_logger(__name__)
@@ -43,8 +44,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # disk; this ordered map just backs the list view (see DECISION_LOG entry 5).
     app.state.reviews = OrderedDict()
     app.state.bg_tasks = set()
-    async with AsyncSqliteSaver.from_conn_string(str(settings.gate_db_path)) as checkpointer:
-        app.state.graph = compile_graph(checkpointer)
+    async with AsyncSqliteSaver.from_conn_string(str(settings.gate_db_path)) as saver:
+        app.state.graph = compile_graph(use_state_allowlist(saver))
         log.info("app_started", db=str(settings.gate_db_path))
         yield
     log.info("app_stopped")
