@@ -412,3 +412,30 @@ suite makes no API calls, so this was checked only at the point where the method
 it fails, the fallback is to disable thinking as described above.
 
 **Outcome:** 107 tests pass at 100% coverage; `mypy --strict` and `ruff` clean.
+
+### Entry 16
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-07T00:00:00Z
+**Task:** Green the CI on PR #3 (release v0.1.2), which failed the 100% coverage gate.
+
+**Context:** `uv run pytest --cov` passes at 100% on Windows but reports 99.80% on Linux CI. The
+single missed line is `agents/investigator.py:254`, the `isinstance(loop, SelectorEventLoop)`
+check inside `_loop_can_spawn_subprocess`, which sits behind an early `sys.platform != "win32"`
+return. On Windows the line is reached incidentally by the harness tests; on Linux nothing can
+reach it. Coverage was therefore host-dependent, and the gate only noticed once CI actually ran.
+
+**Decision:** Add a unit test that fakes the platform (`monkeypatch` on `investigator.sys.platform`
+= `"win32"`) and stubs `asyncio.get_running_loop` with a `Mock(spec=asyncio.SelectorEventLoop)`, so
+the win32 branch executes on every host. Rejected `# pragma: no cover` and a coverage exclusion:
+both hide a real branch of a documented platform workaround, and the existing sibling test already
+pins the POSIX direction the same way — this makes the pair symmetric.
+
+**Impact / Risk:** Test-only change; `src/` untouched. The stub asserts on type identity rather
+than real loop behaviour, so it pins the contract of the check, not that a real Windows
+`SelectorEventLoop` fails to spawn — that remains covered only by the comment and the upstream
+uvicorn source cited in the docstring.
+
+**Outcome:** 114 passed, 100% statement and branch coverage locally; ruff check and format clean.
+Not yet confirmed on Linux CI — the fix is uncommitted at the time of writing.

@@ -6,6 +6,9 @@ so these tests pin the shapes the harness must tolerate.
 
 from __future__ import annotations
 
+import asyncio
+from unittest.mock import Mock
+
 import pytest
 
 from gate.agents import investigator
@@ -138,3 +141,15 @@ def test_only_windows_selector_loops_are_treated_as_subprocess_incapable(
     the check must key on the platform too, not the loop class alone."""
     monkeypatch.setattr(investigator.sys, "platform", "linux")
     assert investigator._loop_can_spawn_subprocess() is True
+
+
+def test_windows_selector_loops_are_treated_as_subprocess_incapable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The win32 branch never executes on Linux CI, so fake the platform rather than let coverage
+    of the loop check depend on which OS ran the suite."""
+    monkeypatch.setattr(investigator.sys, "platform", "win32")
+    monkeypatch.setattr(
+        investigator.asyncio, "get_running_loop", lambda: Mock(spec=asyncio.SelectorEventLoop)
+    )
+    assert investigator._loop_can_spawn_subprocess() is False
