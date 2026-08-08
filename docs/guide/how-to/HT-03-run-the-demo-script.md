@@ -3,7 +3,7 @@
 **When:** you want to see all three demo reviews end to end, narrated, without clicking through
 the UI — for a walkthrough, a recording, or a smoke test of a real configuration.
 **Prerequisites:** a shell in the repository root; `uv sync` done; `ANTHROPIC_API_KEY` set in
-`.env`; the policy corpus ingested. See [`../operations/OP-01-install.md`](../operations/OP-01-install.md).
+`.env`. See [`../operations/OP-01-install.md`](../operations/OP-01-install.md).
 **Time / impact:** a few minutes. **This makes real Anthropic API calls and costs money.** It
 needs no server — it drives the pipeline in-process with an in-memory checkpoint store, and the
 human decisions are scripted.
@@ -35,8 +35,12 @@ human decisions are scripted.
 | `003_auth_change` | Autonomous investigation, scripted **Request more info** then **Approve** | `approved` |
 
 **If it fails:** an authentication error means `ANTHROPIC_API_KEY` is unset or invalid; a run with
-no policy citations means the corpus was never ingested. Both are covered in
-[`../operations/OP-05-incident-runbook.md`](../operations/OP-05-incident-runbook.md).
+no policy citations points at the change-type mapping in `data/policies/index.yaml`. Both are
+covered in [`../operations/OP-05-incident-runbook.md`](../operations/OP-05-incident-runbook.md).
+
+> The script covers the three fixture beats only. The fourth demo beat — a live GitHub pull
+> request by URL — needs the server and the UI, since the two-mode input is where a URL is
+> entered. See [`HT-01-review-a-pull-request.md`](HT-01-review-a-pull-request.md).
 
 ## Related
 

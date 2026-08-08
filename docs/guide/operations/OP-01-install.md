@@ -13,12 +13,21 @@ One process serves everything:
   the same process.
 - **SQLite checkpoint file** (`checkpoints.db` by default) — every review step is checkpointed
   here. This is what makes a paused review survive a restart.
-- **Chroma vector store** (`.chroma/` by default) — the embedded policy corpus, built from
-  `data/policies/*.md`. Embeddings are computed locally, so retrieval costs no API spend.
-- **Anthropic API** — the only external dependency, called for classification, risk scoring, the
-  specialists, and the investigator sub-agent.
-- **Fixture directory** (`data/sample_prs/`) — the pull requests under review. There is no live
-  GitHub intake.
+- **Policy corpus** (`data/policies/`) — Markdown documents plus `index.yaml`, which maps each
+  change type to the files that govern it. Retrieval is a deterministic file lookup: no vector
+  store, no embedding model, no ingestion step. The corpus is validated at startup, so a broken
+  one fails the process rather than a review.
+- **Anthropic API** — called for classification, risk scoring, the specialists, and the
+  investigator sub-agent.
+- **Pull-request sources** — a fixture directory (`data/sample_prs/`) *and* live GitHub, reached
+  by PR URL through the GitHub MCP server. Live PRs are shallow-cloned into a workspace cache
+  (`data/workspaces/` by default), which becomes the investigator's sandbox root.
+- **Langfuse** (optional) — a dev-time trace backend started from
+  `docker-compose.langfuse.yml`. The app runs normally with it down; set `GATE_OTEL_ENABLED=false`
+  to install a no-op tracer.
+- **Semgrep** (optional) — the investigator's static-analysis tool, installed with
+  `uv sync --extra semgrep`. Absent, investigations still run and report
+  `semgrep unavailable: …`.
 
 ## Prerequisites
 
@@ -26,15 +35,18 @@ One process serves everything:
 - [`uv`](https://docs.astral.sh/uv/) on `PATH` (for the from-source install below).
 - An Anthropic API key with access to the configured models.
 - Outbound HTTPS to the Anthropic API.
-- Roughly 500 MB free disk: the local embedding model is downloaded on first ingest.
+- For live GitHub intake: `git` on `PATH`, a read-only GitHub PAT (`contents:read` +
+  `pull_requests:read`), and whatever runtime `GATE_GH_MCP_COMMAND` needs (Node/`npx` by default).
+- Disk for the clone cache: budget at least `GATE_WORKSPACE_MAX_GB` (5 GB default).
+- Optional: Docker, to run the Langfuse trace backend.
 
-The steps below install from a checkout. The project is **not published to PyPI** — publication is
-on hold until the pipeline reads live GitHub pull requests instead of local fixtures — so there is
-no `pip install pr-compliance-gate` to run. You can still install a wheel you build yourself
+The steps below install from a checkout. The project is **not yet published to PyPI** — the hold
+that kept it unpublished (live GitHub intake) has been lifted, but publication remains a separate
+release decision — so there is no `pip install pr-compliance-gate` to run. You can still install a wheel you build yourself
 (`uv build`, then `pip install dist/pr_compliance_gate-*.whl`); the corpus, fixtures, and UI are
 bundled in it. Such an install ships no `.env.example`, so skip steps 1–2 and set the key directly
 in the environment (`export ANTHROPIC_API_KEY=sk-ant-...`, or write your own `.env` in the working
-directory), then follow steps 4–5 with every `uv run` prefix dropped.
+directory), then follow step 4 with every `uv run` prefix dropped.
 
 ## Steps
 
@@ -69,34 +81,42 @@ directory), then follow steps 4–5 with every `uv run` prefix dropped.
    > setting in [`OP-02-configure.md`](OP-02-configure.md) before a real run — in particular, confirm
    > the `GATE_MODEL_*` ids exist on the live API, since they are only defaults.
 
-4. Ingest the policy corpus into Chroma. This is a one-time step, repeated only when
-   `data/policies/*.md` changes:
-
-   ```bash
-   uv run python -m gate.intake.ingest
-   ```
-
-   Expected output:
+   For live GitHub intake, also set:
 
    ```
-   ingested 7 policy chunks into .chroma
+   GATE_GITHUB_TOKEN=ghp_...
    ```
 
-   Seven is the count for the corpus shipped in `data/policies/` (three files, seven `##`
-   policy headings). Any count above zero is fine. A count of `0` means no
-   policy heading matched the expected `SEC-01`-style id format — see
-   [`OP-05-incident-runbook.md`](OP-05-incident-runbook.md).
+   Use a **read-only** token (`contents:read`, `pull_requests:read`). The gate never comments,
+   labels, or merges, so a write scope buys nothing and costs blast radius.
 
-5. Start the server:
+   > There is no ingestion step. Policy retrieval reads `data/policies/index.yaml` directly, and
+   > the server validates it at startup — an unmapped change type, a missing file, or a heading
+   > without a `SEC-01`-style id fails the process with a named error rather than producing
+   > reviews that cite nothing. See [`OP-05-incident-runbook.md`](OP-05-incident-runbook.md).
+
+4. Start the server:
 
    ```bash
    uv run uvicorn gate.api.app:app
    ```
 
-   > **Warning:** do not add `--reload`. It makes uvicorn pick an event loop that cannot spawn a
-   > subprocess on Windows, and the investigator drives the Claude Code CLI as a subprocess — so
-   > every investigation would come back inconclusive. Nothing else in the pipeline is affected,
-   > which is what makes it confusing to diagnose.
+   > **Warning:** do not add `--reload` or `--workers`. They make uvicorn pick an event loop that
+   > cannot spawn a subprocess on Windows, and three things need one: the investigator (which
+   > drives the Claude Code CLI), the workspace clone (`git`), and semgrep. All three degrade with
+   > a message naming this cause; nothing else in the pipeline is affected, which is what makes it
+   > confusing to diagnose.
+
+5. Optional — start the trace backend and re-check the review detail page for a **View trace**
+   link:
+
+   ```bash
+   docker compose -f docker-compose.langfuse.yml up -d
+   ```
+
+   Create a Langfuse project in its UI, then put its OTLP credentials in
+   `OTEL_EXPORTER_OTLP_HEADERS` and restart the app. With `GATE_OTEL_ENABLED=false` the app runs
+   normally and the link is omitted entirely rather than rendered dead.
 
 ## Post-install health check
 
@@ -119,6 +139,7 @@ directory), then follow steps 4–5 with every `uv run` prefix dropped.
    ```
 
 3. Confirm the UI serves: open <http://127.0.0.1:8000> and check the dropdown is populated.
+   The **GitHub PR URL** radio next to it enables the live-intake input.
 
 4. Confirm end-to-end behaviour with the cheapest fixture: start a review of `001_docs_typo` in
    the UI. It should reach `done` with verdict `auto_approved`.
@@ -126,9 +147,14 @@ directory), then follow steps 4–5 with every `uv run` prefix dropped.
 **Verify:** step 4 produced an `auto_approved` verdict, and `checkpoints.db` now exists in the
 working directory.
 
+5. Optional — confirm live intake: paste a public pull-request URL into the **GitHub PR URL**
+   field. A malformed URL must come back as an immediate red banner (a `422`) with *no* review row
+   created; a valid one appears in the list with a `github` badge while the clone runs.
+
 **If it fails:** see [`OP-05-incident-runbook.md`](OP-05-incident-runbook.md). The most common
-first-run failures are an unset `ANTHROPIC_API_KEY` and a model id that does not exist on the
-account.
+first-run failures are an unset `ANTHROPIC_API_KEY`, a model id that does not exist on the
+account, and — for live intake — a `GATE_GITHUB_TOKEN` that is missing or lacks
+`pull_requests:read`.
 
 ## Next
 

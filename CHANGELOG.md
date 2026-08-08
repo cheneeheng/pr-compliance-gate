@@ -5,6 +5,69 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+The v2 plan family: live GitHub intake, end-to-end tracing, deterministic policy retrieval, and
+real static analysis inside the investigator.
+
+### Added
+
+- **Live GitHub pull-request intake.** `POST /api/reviews` now takes `pr_url` as an alternative
+  to `pr_id` (exactly one required). A `PRSource` adapter splits the work at the request/background
+  seam: `resolve` runs in the handler and maps a bad URL, a missing repo, or an under-scoped token
+  to `422`/`404`/`403` *before* a review thread exists; `load` runs in the background and fails by
+  escalation instead. Metadata, the paginated changed-file list, and the diff come from the GitHub
+  MCP server; the repo tree is a shallow clone at `head_sha`, LRU-evicted against
+  `GATE_WORKSPACE_MAX_GB`, which becomes the investigator's sandbox root.
+- **OpenTelemetry tracing** exported over OTLP/HTTP to a self-hosted Langfuse
+  (`docker-compose.langfuse.yml`, a dev-time sidecar). Spans cover every graph node, every LLM
+  call (with GenAI semantic-convention attributes plus effort, structured-output method, and
+  thinking tokens), and every investigator turn and tool call. The run span carries
+  `gate.risk.level`, `gate.route.taken`, `gate.cost.investigator_usd` and friends, which is what
+  turns the README's cost-gate claims into evidence. `ReviewState.trace_id` deep-links the UI;
+  `GATE_OTEL_ENABLED=false` installs a no-op tracer so the app runs with no backend.
+- **`run_semgrep`, a fourth investigator tool**, over a committed, pinned ruleset in `rules/`
+  whose rules map to policy ids. Budgeted by `GATE_SEMGREP_TIMEOUT_S`, `_MAX_RESULTS`, and
+  `_MAX_RUNS`, and counted against the existing tool-call budget. Results reach the re-run
+  specialists as citable evidence. `InvestigationReport` gains `static_analysis[]` and
+  `semgrep_runs`; the UI renders them, keying its empty state off the run count so "ran and found
+  nothing" is distinguishable from "never ran".
+- An **intake short-circuit**: a review whose `load` failed routes straight to the human gate
+  instead of paying Haiku to classify nothing and Sonnet to review nothing. It still runs through
+  the graph, so the failed review stays checkpointed, resumable and traced.
+- `EscalationReason` gains `pr_too_large` and `source_unavailable`; `ReviewState` gains `source`,
+  `pr_ref`, `workspace_path` and `trace_id`; new entities `PRRef` and `StaticFinding`.
+- `GATE_STATE_VERSION`, stamped into `checkpoints.db` and checked at startup, so an incompatible
+  checkpoint refuses to start rather than crashing on resume.
+- A `network` pytest marker for tests that reach GitHub, excluded from the default run alongside
+  `llm`.
+
+### Changed
+
+- **Policy retrieval is now a deterministic `change_type` → file lookup** driven by
+  `data/policies/index.yaml`, with whole-token keyword overrides. It is validated at startup — an
+  unmapped change type, a missing file, or a heading without a policy id fails the process, not a
+  review. Retrieval now returns the *complete* set of headings for the relevant files rather than
+  a top-k sample, so a specialist can no longer miss a policy because it ranked seventh.
+- Diff truncation for live PRs is per-file aware: whole hunks reach the model, and files dropped
+  by the budget are named in the trailing marker.
+- The event-loop subprocess preflight moved to `gate.runtime` and is now shared by the Agent SDK,
+  the workspace clone, and semgrep — all three fail identically on a `SelectorEventLoop`.
+- The `pr_id` path-safety check moved onto the fixture adapter, where it belongs: a live `pr_id`
+  legitimately contains `/` and `#`, and the sandbox root is no longer derived from it.
+- `GET /api/reviews/{thread_id}` returns `{...ReviewState, langfuse_ui_base}` rather than a bare
+  snapshot; list items gain `source`.
+
+### Removed
+
+- **Chroma, the embedding model, and the ingestion step.** `langchain-chroma`, `chromadb`,
+  `langchain-huggingface` and `sentence-transformers` are gone, along with
+  `uv run python -m gate.intake.ingest`, `GATE_CHROMA_DIR`, `GATE_EMBED_MODEL` and
+  `POLICY_COLLECTION`. Embedding search does not earn its place at a three-document corpus keyed
+  by a closed enum; the threshold for revisiting it is documented rather than left implicit.
+- `PolicyChunk.distance` — there is no similarity score without a similarity search. This is the
+  one narrowing in the family and the reason `GATE_STATE_VERSION` exists.
+
 ## [0.1.2] - 2026-08-06
 
 Per-tier reasoning effort, a move to Sonnet 5, and the fixes that fell out of running the

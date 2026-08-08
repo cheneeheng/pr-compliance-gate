@@ -58,11 +58,17 @@ cannot double-count it.
 
 ## Investigator sandbox
 
-The sub-agent has exactly three read-only tools — `read_file`, `grep_repo`, `list_dir` — rooted at
-`data/sample_prs/<pr_id>/repo/`. Relative traversal (`..`) and absolute paths are rejected. There
-is no write, network, or shell access. Turn, tool-call, and per-file byte budgets are enforced by
-the harness, and the harness — not the model — reports the tool-call count, cost estimate, and
-list of files examined.
+The sub-agent has exactly four read-only tools — `read_file`, `grep_repo`, `list_dir`,
+`run_semgrep` — rooted at the review's workspace: a fixture's `repo/` snapshot, or a live pull
+request's shallow clone under `data/workspaces/<head_sha>/`. The root is injected by the source
+adapter, never derived from `pr_id`. Relative traversal (`..`) and absolute paths are rejected.
+There is no write, network, or shell access — `run_semgrep` uses a committed local ruleset, never
+`--config auto`, so the scan stays offline and reproducible.
+
+Turn, tool-call, per-file byte, and semgrep run/result budgets are enforced by the harness, and the
+harness — not the model — reports the tool-call count, semgrep run count, cost estimate, static
+findings, and list of files examined. A failed semgrep run still spends a run and a tool call, so a
+broken scanner cannot be retried for free.
 
 ## File layout
 
@@ -73,11 +79,14 @@ list of files examined.
 | `data/sample_prs/<pr_id>/diff.patch` | Unified diff; the changed-file list is parsed from its `diff --git` headers. |
 | `data/sample_prs/<pr_id>/repo/` | The snapshot the investigator may read. Optional. |
 | `checkpoints.db` | SQLite checkpoints — every review's persisted state. Path set by `GATE_DB_PATH`. |
-| `.chroma/` | The embedded policy corpus. Derived; rebuildable. Path set by `GATE_CHROMA_DIR`. |
+| `data/policies/index.yaml` | Maps each change type to the policy files that govern it, plus keyword overrides. Validated at startup. |
+| `data/workspaces/<head_sha>/` | Shallow clone of a live PR; the investigator's sandbox root. Derived; LRU-evicted. Path set by `GATE_WORKSPACE_DIR`. |
+| `rules/*.yaml` | The committed, pinned semgrep ruleset. Bundled into the wheel. |
 | `static/index.html` | The entire UI, served by the app. |
 | `examples/demo.py` | The narrated three-beat demo. |
 
 ## Not in this build
 
-Live GitHub intake, authentication and multi-user support, hosted deployment, tracing dashboards,
-pagination, and real static-analysis investigator tools are all out of scope.
+Authentication and multi-user support, hosted deployment *of the application*, writing results
+back to GitHub (the token is read-only by design), webhook or GitHub-App triggers, and pagination
+on list endpoints are all out of scope.

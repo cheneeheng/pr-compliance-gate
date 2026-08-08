@@ -49,6 +49,16 @@ async def _run_specialist(state: ReviewState, specialty: Specialty) -> dict[str,
     user = f"Diff:\n{diff}\n\nPolicy chunks:\n{_policy_slice(state, specialty)}"
     if state.investigation is not None:
         user += f"\n\nInvestigation notes:\n{state.investigation.summary}"
+        # Concrete evidence, so a specialist can cite rule/path/line in a Finding.description and
+        # raise severity to `block` with something behind it. `merge_findings` is what makes the
+        # raise visible: the re-run's batch *replaces* this specialist's prior findings, so the
+        # pre-semgrep `needs_more_context` note does not linger beside the evidence-backed block.
+        evidence = "\n".join(
+            f"- {f.rule_id} {f.path}:{f.line} ({f.severity.value})"
+            for f in state.investigation.static_analysis
+        )
+        if evidence:
+            user += f"\n\nStatic analysis hits:\n{evidence}"
 
     try:
         result = await asyncio.wait_for(

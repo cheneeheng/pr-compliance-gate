@@ -439,3 +439,91 @@ uvicorn source cited in the docstring.
 
 **Outcome:** 114 passed, 100% statement and branch coverage locally; ruff check and format clean.
 Not yet confirmed on Linux CI — the fix is uncommitted at the time of writing.
+
+### Entry 17
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-08T00:00:00Z
+**Task:** Implement the v2 plan family (ITER_01_v2 … ITER_04_v2).
+
+**Context:** ITER_01_v2 §04 states "`intake/store.py` is unaffected. It is the session-scoped
+thread registry backing `GET /api/reviews` — naming coincidence only." That is wrong about the
+shipped code: `intake/store.py` is the Chroma vector-store accessor, and the thread registry is
+`app.state.reviews` (an `OrderedDict` created in the lifespan). Following the plan literally would
+have left a module importing `langchain_chroma` after its only dependency was removed.
+
+**Decision:** Deleted `intake/store.py` along with `intake/ingest.py`. The registry the plan meant
+is `app.state.reviews`, which was extended in ITER_03_v2 with a `Registration` model carrying
+`source` and `pr_ref` — the behaviour the plan asked for, in the place it actually lives.
+
+**Impact / Risk:** None beyond the intended Chroma removal. The plan's `store.py` paragraph is now
+inaccurate as written; the code is what it describes in intent.
+
+**Outcome:** `uv run pytest --cov` green at 100% statement and branch coverage; ruff and
+`mypy --strict` clean.
+
+### Entry 18
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-08T00:00:00Z
+**Task:** Shape the `PRSource` protocol (ITER_03_v2 §04).
+
+**Context:** The plan specifies `resolve(ref_input) -> PRRef | None` and `load(ref) -> PRPayload`.
+`FixturePRSource.load` has no `PRRef` to work from — fixtures return `None` from `resolve` — so a
+literal `load(ref)` would need the adapter instance to carry the fixture id across the
+handler-to-background-task boundary as hidden state.
+
+**Decision:** `load(ref_input, ref)` — both methods take the original reference input. The
+two-method split the plan is actually arguing for (cheap/HTTP-mapped vs. slow/escalating) is
+unchanged; the adapters just stay stateless, so nothing half-resolved has to survive the hop.
+
+**Impact / Risk:** Deviates from the plan's exact signature. `GitHubMCPSource.load` re-resolves
+when handed `ref=None`, which costs one extra MCP round trip in a path the API never takes.
+
+**Outcome:** Both adapters satisfy the protocol; `mypy --strict` clean.
+
+### Entry 19
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-08T00:00:00Z
+**Task:** Install the tracer provider (ITER_02_v2 §04).
+
+**Context:** `GATE_OTEL_ENABLED=false` was implemented as `trace.set_tracer_provider(NoOp...)`, per
+the plan's "installs a no-op provider". A test caught that this silently does nothing: OTel guards
+that setter with a process-wide `Once`, so the second call in a process — the kill switch after any
+enabled run, or a second app instance — is refused with a log warning and no effect.
+
+**Decision:** `gate.telemetry.tracing` holds its own `_provider` and `tracer()` reads it, falling
+back to the OTel global only when unset. `trace.set_tracer_provider` is still called for
+third-party instrumentation that reads the global, but nothing here depends on it succeeding.
+
+**Impact / Risk:** The gate's spans no longer follow a provider installed by unrelated code in the
+same process. That is the intended trade: the kill switch has to actually work.
+
+**Outcome:** `test_the_kill_switch_installs_a_no_op_provider` passes; the whole suite runs in ~12s
+instead of ~67s once `conftest.py` also disabled tracing by default.
+
+### Entry 20
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-08T00:00:00Z
+**Task:** Package semgrep (ITER_04_v2 §03).
+
+**Context:** The plan calls for an exact pin and says to move it to an optional `[semgrep]` extra
+only if the pinned version lacks a wheel for a supported interpreter. semgrep 1.172.0 does publish
+a `win_amd64` wheel and supports Python ≥3.10, so the stated fallback condition does not fire.
+
+**Decision:** Shipped it as an optional extra anyway (`uv sync --extra semgrep`). It is a large
+install, and the harness already degrades cleanly without it — the same code path that covers a
+missing binary. `uv sync` therefore stays light and every semgrep branch is unit-tested against a
+stubbed subprocess, so no test depends on the extra being installed.
+
+**Impact / Risk:** A default install has an investigator whose fourth tool reports
+`semgrep unavailable`. Documented in the README install section and OP-01.
+
+**Outcome:** Rules verified to fire on fixture 003 with the extra installed; the full default suite
+passes with or without it.

@@ -17,7 +17,11 @@ to your operator — see [`operations/OP-05-incident-runbook.md`](operations/OP-
 | Banner: `Already decided — refreshing.` | The decision was already submitted — a double-click or a second tab. | Nothing to do; the page refreshes to the current state. |
 | Banner: `Decision failed: …` | The submission did not reach the server. | The buttons re-enable. Retry once. If it fails again, report the message. |
 | Decision buttons never appear despite `awaiting_human` | The page missed a poll. | Click **← Reviews**, then reopen the review. |
-| Findings cite no policy id, or none at all | The policy corpus was never ingested, or is stale. | Operator issue: re-run policy ingestion. |
+| Findings cite no policy id, or none at all | The change's `change_type` maps to no policy file, or the corpus is thin for it. | Operator issue: check `data/policies/index.yaml`. |
+| Escalation panel reads `pr_too_large` | The pull request has more changed files than `GATE_GH_MAX_FILES`. | Deliberate: the gate refuses rather than reviewing a subset. Split the PR, or ask your operator to raise the cap. |
+| Escalation panel reads `source_unavailable` | GitHub rate-limited the fetch, or the repository could not be cloned. | Retry the review later. If it repeats, it is an operator issue. |
+| Investigation shows `—` under Static analysis | Semgrep never ran on this review. | Not a failure. `no static findings` would mean it ran and found nothing. |
+| No **View trace** link on a review | Tracing is disabled, or the review predates it. | Expected when `GATE_OTEL_ENABLED=false`. |
 | Investigation summary reads `investigation inconclusive: …` | The sub-agent hit a budget ceiling or errored. | Not a crash — decide on the evidence you have, or use **Request more info** with a sharper question if budget remains. |
 | Escalation panel reads `max_cycles` | The investigation budget is spent with questions still open. | **Request more info** will not buy another useful round. Approve or reject on what you have. |
 | Escalation panel reads `timeout` | A specialist did not finish in time; its input is missing. | Decide cautiously, or ask your operator to re-run the review with a longer specialist timeout. |

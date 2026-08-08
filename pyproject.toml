@@ -69,6 +69,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Pinned to an exact patch: rule behaviour changes between minors, and an unpinned scanner makes
+# the demo non-reproducible and every eval assertion flaky. Kept as an extra rather than a core
+# dependency because it is a large install and the harness already degrades cleanly without it
+# (`semgrep unavailable: semgrep binary not available`) — so `uv sync` stays light and CI legs on
+# interpreters semgrep has not caught up with still run the full unit suite, where every semgrep
+# path is stubbed.
+semgrep = ["semgrep==1.172.0"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
@@ -99,6 +106,7 @@ packages = ["src/gate"]
 # wheel has no repo checkout to read them from. `gate.paths` looks in `_bundled/` first.
 "data" = "gate/_bundled/data"
 "static" = "gate/_bundled/static"
+"rules" = "gate/_bundled/rules"
 
 [tool.hatch.build.targets.sdist]
 # Explicit so the agent workspace, planning notes, and local state stay out of the distribution.
@@ -109,6 +117,7 @@ include = [
     "examples",
     "data",
     "static",
+    "rules",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",

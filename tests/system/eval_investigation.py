@@ -47,3 +47,40 @@ async def test_investigator_examines_expected_files() -> None:
     assert any(h in examined for h in hits), (
         f"no expected hit {hits} in files_examined={report.files_examined}"
     )
+
+
+async def test_the_investigator_runs_semgrep_and_reports_a_committed_rule() -> None:
+    """Behavioural smoke, not a benchmark — the same standard set in ITER_03 §06.
+
+    Rule ids are matched by suffix: semgrep prefixes them with the config directory name, which
+    depends on where the ruleset resolved to.
+    """
+    fixture = load_pr("003_auth_change")
+    expected = fixture.meta.get("expected_semgrep_rule_ids", [])
+    assert expected, "fixture 003 must declare expected_semgrep_rule_ids"
+
+    state = ReviewState(
+        pr_id="003_auth_change",
+        diff=fixture.diff,
+        files_changed=fixture.files_changed,
+        specialist_findings=[
+            Finding(
+                specialist=Specialty.security,
+                severity=Severity.warn,
+                policy_id="SEC-01",
+                description="Does the new audit module introduce network egress or log PII?",
+                confidence=0.5,
+                needs_more_context=True,
+            )
+        ],
+    )
+    settings = get_settings()
+
+    report = await run_investigation(state, settings)
+
+    assert report.static_analysis, "the investigator produced no static findings"
+    assert report.semgrep_runs <= settings.gate_semgrep_max_runs
+    found = {f.rule_id for f in report.static_analysis}
+    assert any(actual.endswith(rule) for rule in expected for actual in found), (
+        f"none of {expected} in {sorted(found)}"
+    )

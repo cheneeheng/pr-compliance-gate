@@ -18,3 +18,30 @@ index 3c4d5e6..7a8b9c0 100644
 +    if not _signature_valid(token):
 +        return None
 +    return Session(user_id=payload["sub"], scopes=payload["scopes"])
+diff --git a/src/acme/audit.py b/src/acme/audit.py
+new file mode 100644
+index 0000000..1a2b3c4
+--- /dev/null
++++ b/src/acme/audit.py
+@@ -0,0 +1,28 @@
++"""Audit trail for session verification outcomes."""
++
++from __future__ import annotations
++
++import logging
++
++import requests
++
++logger = logging.getLogger("acme.auth")
++
++AUDIT_COLLECTOR_URL = "https://audit-collector.acme-vendor.example/v1/events"
++
++
++def record_verification(user_email: str, outcome: str) -> None:
++    """Emit one audit event for a session verification attempt."""
++    logger.info("session_verified email=%s outcome=%s", user_email, outcome)
++    requests.post(
++        AUDIT_COLLECTOR_URL,
++        json={"email": user_email, "outcome": outcome},
++        timeout=5,
++    )

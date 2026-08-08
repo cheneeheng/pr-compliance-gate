@@ -131,6 +131,25 @@ class Finding(BaseModel):
     needs_more_context: bool = False
 
 
+class StaticFinding(BaseModel):
+    """One semgrep hit, shaped down from the scanner's JSON.
+
+    ``severity`` reuses the ``Finding`` vocabulary so the UI badge component is shared. ``Finding``
+    is deliberately *not* given a matching ``source`` field: semgrep output is evidence the
+    investigator reports, while a ``Finding`` stays a specialist's policy judgment citing a
+    ``policy_id``. Blurring the two would make "which policy does this violate" unanswerable for
+    machine-generated hits.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    rule_id: str
+    severity: Severity
+    path: str
+    line: int
+    message: str
+
+
 class InvestigationReport(BaseModel):
     """Output of the autonomous investigator sub-agent."""
 
@@ -141,6 +160,11 @@ class InvestigationReport(BaseModel):
     files_examined: list[str] = Field(default_factory=list)
     tool_calls_count: int = 0
     cost_estimate_usd: float = 0.0
+    # Harness-owned, like every other metric here: the model authors narrative only.
+    static_analysis: list[StaticFinding] = Field(default_factory=list)
+    # Distinguishes "ran and found nothing" from "never ran" — `static_analysis` defaulting to
+    # `[]` cannot, and that distinction is exactly what a reviewer needs.
+    semgrep_runs: int = 0
 
 
 class EscalationRecord(BaseModel):
@@ -255,6 +279,7 @@ CHECKPOINT_ALLOWLIST: tuple[tuple[str, str], ...] = tuple(
         "Classification",
         "RiskAssessment",
         "Finding",
+        "StaticFinding",
         "InvestigationReport",
         "EscalationRecord",
         "HumanDecision",

@@ -1,0 +1,82 @@
+# Hand-written rules aligned to this repo's policy corpus.
+#
+# Rules that map to a policy id are what make the investigator's output *citable* rather than
+# generic lint noise: each `message` leads with the policy id a specialist should cite, and each
+# `severity` uses semgrep's ERROR/WARNING/INFO, which the tool maps onto the gate's
+# block/warn/info vocabulary.
+#
+# The ruleset is committed and pinned. `--config auto` would fetch rules from the network at run
+# time, which breaks the harness's no-network sandbox *and* makes results non-deterministic
+# between runs; the resolved local directory is the only permitted config.
+
+rules:
+  - id: gate-sec-01-new-network-egress
+    languages: [python]
+    severity: WARNING
+    message: >-
+      SEC-01: new outbound network call. Egress to a host not already used by the service
+      requires security review.
+    metadata:
+      policy_id: SEC-01
+    patterns:
+      - pattern-either:
+          - pattern: requests.$METHOD(...)
+          - pattern: httpx.$METHOD(...)
+          - pattern: urllib.request.urlopen(...)
+          - pattern: socket.create_connection(...)
+
+  - id: gate-sec-02-hardcoded-secret
+    languages: [python]
+    severity: ERROR
+    message: >-
+      SEC-02: a credential-shaped literal is assigned in source. Secrets are loaded from the
+      environment at runtime, never committed.
+    metadata:
+      policy_id: SEC-02
+    patterns:
+      - pattern-either:
+          - pattern: $NAME = "..."
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i).*(api_?key|secret|password|passwd|token|private_?key).*
+      - pattern-not: $NAME = ""
+      # An env-var *name* is not a secret; the value it points at is.
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: ^(?!_?[A-Z_]*_ENV$).*
+
+  - id: gate-sec-03-auth-check-removed
+    languages: [python]
+    severity: ERROR
+    message: >-
+      SEC-03: a session/token verification helper returns True unconditionally, which disables
+      the access-control check it stands for.
+    metadata:
+      policy_id: SEC-03
+    patterns:
+      - pattern-either:
+          - pattern: |
+              def $FUNC(...) -> bool:
+                  return True
+      - metavariable-regex:
+          metavariable: $FUNC
+          regex: (?i).*(auth|verify|validate|signature|permission|allowed).*
+
+  - id: gate-data-03-pii-reaching-a-logger
+    languages: [python]
+    severity: ERROR
+    message: >-
+      DATA-03: a PII-shaped value is passed to a logger. Personal data must not be written to
+      application logs.
+    metadata:
+      policy_id: DATA-03
+    patterns:
+      - pattern-either:
+          - pattern: $LOG.$LEVEL(..., $VALUE, ...)
+          - pattern: $LOG.$LEVEL(..., $KEY=$VALUE, ...)
+      - metavariable-regex:
+          metavariable: $LOG
+          regex: (?i)^(log|logger|logging|_log)$
+      - metavariable-regex:
+          metavariable: $VALUE
+          regex: (?i).*(email|password|ssn|token|credit_?card|phone|address|user_?name).*

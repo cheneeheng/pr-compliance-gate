@@ -6,39 +6,47 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 An agentic pipeline that reviews pull requests against organizational policy (security,
 licensing, data-handling) before merge. It is a **portfolio artifact** demonstrating
-production-grade agent orchestration — cost gating, failure modes, human-in-the-loop — not a
-hosted product. Intake is from local fixtures, not live GitHub; it is single-user with no auth.
+production-grade agent orchestration — cost gating, failure modes, human-in-the-loop,
+observability — not a hosted product. Intake is from live GitHub (by PR URL, via the GitHub MCP
+server) *or* local fixtures; it is single-user with no auth and the GitHub token is read-only.
 
 ## Commands
 
 ```bash
 uv sync --extra dev                       # install (plain `uv sync` skips the dev extra)
 uv run pre-commit install                 # once per clone: ruff check --fix + format on commit
-cp .env.example .env                      # then set ANTHROPIC_API_KEY for real runs
-uv run python -m gate.intake.ingest       # embed the policy corpus into Chroma (one-time)
+uv sync --extra semgrep                   # optional: the investigator's static-analysis tool
+cp .env.example .env                      # then set ANTHROPIC_API_KEY (+ GATE_GITHUB_TOKEN for live PRs)
+docker compose -f docker-compose.langfuse.yml up -d   # optional: trace backend
 uv run uvicorn gate.api.app:app           # serve API + UI at http://127.0.0.1:8000
 # NOTE: no --reload. On Windows it selects a SelectorEventLoop, which cannot spawn a
-# subprocess, and the Agent SDK investigator needs one (see the investigator section).
+# subprocess, and three things need one: the Agent SDK investigator, the workspace clone, and
+# semgrep. All three call `gate.runtime.loop_supports_subprocess()` first.
+# There is no ingest step: policy retrieval is a deterministic file lookup.
 
-uv run pytest                             # default suite — NO API calls (see addopts below)
+uv run pytest                             # default suite — NO API calls, NO network
 uv run pytest --cov                       # same suite + coverage; fails under 100%
-uv run pytest -m llm                      # behavioral evals hitting the real Anthropic API (needs key + ingest)
+uv run pytest -m llm                      # behavioral evals hitting the real Anthropic API (needs key)
+uv run pytest -m network                  # live GitHub smoke tests (needs GATE_GITHUB_TOKEN)
 uv run pytest tests/unit/test_reconcile.py::test_name   # single test
 uv run ruff check . && uv run ruff format .
 uv run mypy src                           # strict mode
 ```
 
-`pytest` defaults to `-m 'not llm'` (`pyproject.toml addopts`), so the plain command never spends
-money or needs a key — the `_test_env` fixture injects a dummy `ANTHROPIC_API_KEY` and points
-storage at tmp paths.
+`pytest` defaults to `-m 'not llm and not network'` (`pyproject.toml addopts`), so the plain
+command never spends money, needs a key, or touches the network — the `_test_env` fixture injects a
+dummy `ANTHROPIC_API_KEY`, points storage at tmp paths, and sets `GATE_OTEL_ENABLED=false` (a live
+OTLP exporter would spend its full retry budget on every lifespan teardown).
 
 Tests are split by what they touch, `conftest.py` at the root applying to all three:
 
 - `tests/unit/` — pure functions, no I/O and no graph (reducers, reconcile's rule ladder, the
   investigator's sandbox and tool closures, the fixture loader, model factories).
-- `tests/integration/` — real components wired together with only the LLM/SDK boundary stubbed
-  (graph nodes, the API against a fake graph, the investigator harness, ingestion/retrieval).
-- `tests/system/` — the `llm`-marked `eval_*.py` files: the real pipeline against the real API.
+- `tests/integration/` — real components wired together with only the LLM/SDK/MCP boundaries
+  stubbed (graph nodes, the API against a fake graph, the investigator harness, the GitHub adapter
+  against hand-captured JSON, the workspace clone against a local bare repo).
+- `tests/system/` — the `llm`- and `network`-marked `eval_*.py` files: the real pipeline against
+  the real API and, for beat 4, a real public PR.
 
 The default (`unit` + `integration`) run must keep **100% statement and branch coverage** of
 `src/gate` — `[tool.coverage.report] fail_under = 100` enforces it, so a new branch needs a new
@@ -67,6 +75,8 @@ semantics:
 
 Flow (`graph/build.py` docstring is the authoritative wiring):
 ```
+PRSource.resolve (handler) -> thread registered -> PRSource.load (background) -> ainvoke
+intake -> human_gate            (escalation seeded by a failed load; the intake short-circuit)
 intake -> classify (Haiku) -> retrieve_policy -> risk_score (Haiku)
   score < GATE_RISK_THRESHOLD -> verdict(auto_approved)        [COST GATE #1: no Sonnet spend]
   else -> {security, license} specialists (Sonnet, parallel)   -> reconcile
@@ -74,6 +84,28 @@ intake -> classify (Haiku) -> retrieve_policy -> risk_score (Haiku)
     investigate (Agent SDK) loops back to specialists          [COST GATE #2]
     human_gate: approve|reject -> verdict ; request_info -> investigate
 ```
+
+### Three subsystems added in v2
+
+- **Deterministic policy retrieval** (`intake/retrieval.py`): `data/policies/index.yaml` maps each
+  `change_type` to policy files, plus whole-token keyword overrides against `touched_areas`.
+  There is no vector store and no embedding model. `validate_policy_index()` runs in the lifespan
+  and fails the *process* on an unmapped enum member, a missing file, or a heading without a
+  parseable `policy_id` — a runtime "unknown change_type → empty list" fallback would be
+  unreachable in a correct install, and unreachable branches are what this codebase deletes rather
+  than pragmas.
+- **Tracing** (`telemetry/tracing.py`): OTel spans exported over OTLP/HTTP to a self-hosted
+  Langfuse. Read that module's docstring before touching it — it documents three traps (the run
+  span must be a *root* linked to the request span because the run outlives the request; the
+  parallel specialist fan-out needs an explicit `context=` because contextvars do not follow into
+  LangGraph branches; the lifespan must drain background tasks *before* `provider.shutdown()`).
+  `tracer()` reads the module's own `_provider`, not the OTel global, because
+  `trace.set_tracer_provider` is a process-wide once-guard that would silently refuse the kill
+  switch.
+- **Live intake** (`intake/sources/`): the `PRSource` protocol has two methods on purpose.
+  `resolve` is cheap, runs in the handler, and raises HTTP-mapped errors; `load` is slow, runs in
+  the background task, and fails by returning an `EscalationRecord`. Collapsing them to one would
+  force either a POST that blocks on a clone or a typo'd URL creating a review row.
 
 ### Two cost gates are the point of the design
 
@@ -103,9 +135,16 @@ state out, no control flow of its own", and confines the `claude-agent-sdk` impo
 dependency whose surface moves — to a single module. Do not merge the harness into the node.
 
 Key invariants:
-- Three **read-only sandboxed tools** (`read_file`, `grep_repo`, `list_dir`) over the PR's repo
-  snapshot (`data/sample_prs/<pr_id>/repo/`). `resolve_in_sandbox` blocks `..` traversal and
-  absolute-path escapes and is pure/module-level so it's unit-testable without the SDK.
+- Four **read-only sandboxed tools** (`read_file`, `grep_repo`, `list_dir`, `run_semgrep`) over
+  the PR's workspace — a fixture's `repo/` snapshot or a live PR's clone, injected as
+  `state.workspace_path`, **never derived from `pr_id`**. `resolve_in_sandbox` blocks `..`
+  traversal and absolute-path escapes and is pure/module-level so it's unit-testable without the
+  SDK.
+- `run_semgrep` (`agents/tools/semgrep.py`) uses the committed `rules/` ruleset resolved through
+  `paths.py` to an **absolute** path. Never `--config auto`: it fetches rules over the network at
+  run time, breaking the no-network sandbox and making results non-deterministic. A *failed* run
+  still increments `semgrep_runs` and still spends a tool call — otherwise a broken scanner is
+  free to retry until the turn budget dies.
 - **Hard budgets** on turns / tool calls / per-file bytes (`GATE_INVESTIGATOR_*`).
 - **Never raises into the graph** — budget exhaustion or SDK error returns an inconclusive
   `InvestigationReport`, so failure lands on a human at the gate, never in a stack trace.
@@ -138,10 +177,10 @@ this survives process restarts.
   `get_settings()` is `lru_cache`d — tests must `get_settings.cache_clear()` (conftest does this).
 - **Paths**: never use CWD-relative paths for shipped assets. `paths.py` anchors them to
   `ASSET_ROOT`, resolved from `__file__` — the wheel's bundled copy (`gate/_bundled/`, populated by
-  hatch `force-include`) when present, else the repo root. Adding a runtime asset directory means
-  adding it to that `force-include` map too. `repo_snapshot_dir(pr_id)` is the investigator
-  sandbox root. Writable state (`checkpoints.db`, `.chroma/`) is CWD-relative on purpose: an
-  installed package must not write into `site-packages`.
+  hatch `force-include`) when present, else the repo root. `data/`, `static/` and `rules/` are all
+  in that map; adding a runtime asset directory means adding it there too. Writable state
+  (`checkpoints.db`, `data/workspaces/`) is CWD-relative on purpose: an installed package must not
+  write into `site-packages`, and a clone cache especially must not.
 - **Fixtures**: a sample PR is `data/sample_prs/<pr_id>/` with `meta.json`, `diff.patch`, and a
   `repo/` snapshot. Changed-file paths are parsed from `diff --git` headers. Malformed fixtures
   fail loud with `FixtureError` (422), never a silently empty review.
@@ -149,6 +188,10 @@ this survives process restarts.
   deliberate for the single-user demo — do not add CORS middleware.
 - Checkpointed sub-values may deserialize as **either dicts or Pydantic instances** — code that
   reads `snapshot.values` (e.g. `list_reviews`) must handle both.
+- **Checkpoint versioning**: `GATE_STATE_VERSION` is stamped into `checkpoints.db` and checked in
+  the lifespan. Bump it only for a *narrowing* change (a removed or retyped field); purely additive
+  fields with defaults still deserialize, and bumping for those would force a pointless delete and
+  train readers to ignore the check. There is deliberately no migration — this is local demo data.
 - **Checkpoint allowlist**: LangGraph's msgpack deserializer only reconstructs types on an
   allowlist. Unregistered ones warn today (`Deserializing unregistered type …`) and the library
   says it will refuse them in a future version — at which point state comes back as a bare dict
@@ -165,12 +208,14 @@ this survives process restarts.
   `test_state.py::test_the_checkpoint_allowlist_covers_every_type_in_this_module` fails if you
   forget. `tests/integration/test_checkpoint_allowlist.py` asserts the round trip warns nothing
   and that undeclared types are refused — assert on both, since only the second catches a no-op.
-- **The investigator needs an event loop with subprocess support.** The Agent SDK drives the
-  Claude Code CLI as a subprocess. `uvicorn --reload` (and `--workers`) sets `use_subprocess`,
-  which forces a `SelectorEventLoop` even on Windows (`uvicorn/loops/asyncio.py`), and that loop
-  raises a bare `NotImplementedError` — empty message — which the SDK surfaces as
-  `Failed to start Claude Code:` with nothing after it. **Never document or run `--reload`.**
-  `run_investigation` preflights this and returns an inconclusive report naming the cause.
+- **Three components need an event loop with subprocess support**: the Agent SDK (which drives
+  the Claude Code CLI), the workspace clone (`git`), and semgrep. `uvicorn --reload` (and
+  `--workers`) sets `use_subprocess`, which forces a `SelectorEventLoop` even on Windows
+  (`uvicorn/loops/asyncio.py`), and that loop raises a bare `NotImplementedError` — empty message —
+  which the SDK surfaces as `Failed to start Claude Code:` with nothing after it. **Never document
+  or run `--reload`.** All three call the one shared check, `gate.runtime.loop_supports_subprocess`,
+  and degrade with `gate.runtime.UNSUPPORTED_LOOP_REASON` naming the cause. A fourth call site
+  means calling that check, not writing a fourth copy.
 - **The Agent SDK subprocess does not inherit the API key.** `pydantic-settings` reads `.env`
   into `Settings`; it never writes `os.environ`. The Claude Code CLI the SDK spawns inherits
   `os.environ`, so the investigator must pass credentials explicitly via `ClaudeAgentOptions.env`
@@ -186,5 +231,8 @@ this survives process restarts.
 
 ## Out of MVP scope
 
-Live GitHub intake, auth/multi-user, hosted deployment, tracing dashboards, real static-analysis
-investigator tools. See `.agents_workspace/planning/v1`.
+mcp-cassette record/replay, prompt benchmarking beyond fixture smoke evals, writing results back to
+GitHub (the token is read-only by design), webhook/GitHub-App triggers, auth/multi-user, hosted
+deployment *of the application* (the Langfuse compose file is a dev-time sidecar), pagination on
+list endpoints, org-wide policy sync, and embedding-based retrieval (revisit only at the threshold
+documented in `ITER_01_v2 §02`). See `.agents_workspace/planning/v2`.

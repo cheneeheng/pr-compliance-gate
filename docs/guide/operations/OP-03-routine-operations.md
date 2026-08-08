@@ -21,27 +21,42 @@ reached by its thread id at `/api/reviews/{thread_id}`.
 
 **Verify:** `curl http://127.0.0.1:8000/api/prs` returns a non-empty array.
 
-## Re-ingest the policy corpus
+## Edit the policy corpus
 
 **When:** after editing, adding, or deleting any file in `data/policies/`.
-**Impact:** the collection is dropped and rebuilt. Retrieval returns nothing for the few seconds
-the rebuild takes; in-flight reviews may cite no policy.
+**Impact:** none while the server runs — the change takes effect on restart. There is nothing to
+rebuild: retrieval reads the files directly.
 
 1. Edit the policy Markdown. Each policy must be an `##` heading whose first token is the policy
-   id, exactly in the form `## SEC-01 — No new network egress without review`. Headings without a
-   matching `XX-00` id token are skipped silently.
-2. Rebuild:
+   id, exactly in the form `## SEC-01 — No new network egress without review`. A heading without a
+   matching `XX-00` id token is a **startup error**, not a silently skipped chunk — specialists
+   cite `policy_id`, so an unlabelled chunk would break that contract invisibly.
+2. If you added or removed a *file*, update `data/policies/index.yaml` so every change type still
+   maps to the files that govern it. Every member of the change-type enum needs an entry, `docs`
+   included — its empty list is deliberate, not an omission.
+3. Restart the server.
 
-   ```bash
-   uv run python -m gate.intake.ingest
-   ```
+**Verify:** the server logs `app_started`. Startup validation has already checked that every
+change type is mapped, every named file exists, and every heading yields a policy id.
 
-**Verify:** the printed chunk count matches the number of `##` policy headings across
-`data/policies/*.md`.
+**If it fails:** the error names the cause — `policy index has no entry for change_type(s): …`,
+`policy file 'x.md' is missing or unreadable`, or `heading '…' has no policy id`. Fix and restart;
+the process refuses to run on a broken corpus rather than producing reviews that cite nothing.
 
-**If it fails:** a count lower than expected means some headings did not match the id pattern.
-Check the id format (2–6 uppercase letters, hyphen, 2–3 digits) and that it is the first token of
-the heading.
+## Manage the clone cache
+
+**When:** disk pressure, or after reviewing a very large repository.
+**Impact:** none. `data/workspaces/` holds only derived data, re-cloned on demand.
+
+Workspaces are named by `head_sha` and evicted least-recently-used against
+`GATE_WORKSPACE_MAX_GB` at startup and after each clone. To reclaim space immediately, stop the
+server and delete the directory:
+
+```bash
+rm -rf data/workspaces
+```
+
+**Verify:** a fresh review of a live pull request succeeds — it re-clones.
 
 ## Add a sample pull request
 
@@ -97,11 +112,13 @@ curl -i -X POST http://127.0.0.1:8000/api/reviews \
 ```bash
 uv run pytest          # unit + integration; no API calls, no key needed
 uv run pytest --cov    # same, with coverage; fails below 100% of src/gate
-uv run pytest -m llm   # behavioural evals against the real API — costs money, needs a key + ingest
+uv run pytest -m llm   # behavioural evals against the real API — costs money, needs a key
+uv run pytest -m network  # live GitHub smoke tests — needs GATE_GITHUB_TOKEN
 ```
 
-The default run is safe to execute at any time: it injects a dummy key and redirects storage to
-temporary paths, so it touches neither your `checkpoints.db` nor your `.chroma` directory.
+The default run is safe to execute at any time: it injects a dummy key, redirects storage to
+temporary paths, and disables tracing, so it touches neither your `checkpoints.db` nor any
+external service.
 
 ## Reset state
 
@@ -116,12 +133,15 @@ rm checkpoints.db                      # blast radius: all review history
 
 Restore by moving the backup back into place while the server is stopped.
 
-Rebuilding the vector store is safe by comparison — `.chroma/` holds only derived data:
+Deleting the clone cache is safe by comparison — `data/workspaces/` holds only derived data:
 
 ```bash
-rm -rf .chroma
-uv run python -m gate.intake.ingest
+rm -rf data/workspaces
 ```
+
+If the app refuses to start with a `GATE_STATE_VERSION` mismatch, that is the checkpoint schema
+having changed under an existing database. There is no migration for local demo data: back up
+`checkpoints.db` if the history matters, then delete it.
 
 **Verify:** the server starts, `app_started` is logged, and a fresh review of `001_docs_typo`
 reaches `auto_approved`.

@@ -1,9 +1,9 @@
 """Autonomous investigator sub-agent (Claude Agent SDK).
 
 LangGraph sees one node (``investigate``) with one entry and one exit; the Agent SDK owns the
-inner tool loop. The agent gets three read-only, sandboxed tools over the change's workspace — a
-fixture snapshot or a live PR's clone — and hard budgets on turns, tool calls, and per-file
-bytes. Budget exhaustion or SDK error never
+inner tool loop. The agent gets four read-only, sandboxed tools over the change's workspace — a
+fixture snapshot or a live PR's clone — and hard budgets on turns, tool calls, per-file bytes, and
+semgrep runs. Budget exhaustion or SDK error never
 raises into the graph — it returns an inconclusive report, so failure lands on a human at the
 gate, never in a stack trace.
 
@@ -32,8 +32,10 @@ from opentelemetry import trace
 from opentelemetry.context import Context
 from pydantic import BaseModel, ConfigDict, Field
 
+from gate.agents.tools.semgrep import render as render_semgrep
+from gate.agents.tools.semgrep import run_semgrep
 from gate.config import Settings
-from gate.graph.state import DecisionAction, InvestigationReport, ReviewState
+from gate.graph.state import DecisionAction, InvestigationReport, ReviewState, StaticFinding
 from gate.llm.models import effort_for, estimate_cost, investigator_model, structured_call
 from gate.llm.prompts import investigator_system
 from gate.logging import get_logger
@@ -48,6 +50,7 @@ _ALLOWED_TOOLS = [
     f"mcp__{_SERVER_NAME}__read_file",
     f"mcp__{_SERVER_NAME}__grep_repo",
     f"mcp__{_SERVER_NAME}__list_dir",
+    f"mcp__{_SERVER_NAME}__run_semgrep",
 ]
 _GREP_MAX_HITS = 40
 
@@ -58,8 +61,12 @@ class _Tracker:
 
     max_tool_calls: int
     max_file_chars: int
+    max_semgrep_runs: int
+    max_semgrep_results: int
     tool_calls: int = 0
     files_examined: list[str] = field(default_factory=list)
+    semgrep_runs: int = 0
+    static_findings: list[StaticFinding] = field(default_factory=list)
     # The investigation span's context, captured before the loop starts. Tool closures run inside
     # the SDK's own tasks, which ambient OTel context does not follow, so it is passed explicitly.
     span_context: Context | None = None
@@ -108,8 +115,8 @@ def tool_span(tracker: _Tracker, name: str, target: str) -> Iterator[None]:
         yield
 
 
-def _build_tools(root: Path, tracker: _Tracker) -> list[SdkMcpTool[object]]:
-    """Build the three sandboxed tool closures over ``root``. Separate from server construction
+def _build_tools(root: Path, tracker: _Tracker, settings: Settings) -> list[SdkMcpTool[object]]:
+    """Build the four sandboxed tool closures over ``root``. Separate from server construction
     so the sandbox and budget behavior can be unit-tested without running the SDK loop."""
 
     def _resolve(path_str: str) -> Path | None:
@@ -178,13 +185,43 @@ def _build_tools(root: Path, tracker: _Tracker) -> list[SdkMcpTool[object]]:
             entries = sorted(f"{p.name}/" if p.is_dir() else p.name for p in path.iterdir())
             return _tool_text("\n".join(entries) if entries else "(empty)")
 
-    return [read_file, grep_repo, list_dir]
+    @tool(
+        "run_semgrep",
+        "Run the pinned local semgrep ruleset over a path inside the workspace and return "
+        "rule id, path, line and message for each hit.",
+        {"path": str},
+    )
+    async def run_semgrep_tool(args: dict[str, object]) -> dict[str, object]:
+        with tool_span(tracker, "run_semgrep", str(args.get("path", "."))):
+            if tracker.budget_exhausted():
+                return _tool_text("tool-call budget exhausted; stop and report.", is_error=True)
+            # Semgrep is not exempt from the tool-call budget just because it is deterministic.
+            tracker.tool_calls += 1
+            if tracker.semgrep_runs >= tracker.max_semgrep_runs:
+                return _tool_text(
+                    "semgrep run budget exhausted; do not re-run it on an unchanged tree.",
+                    is_error=True,
+                )
+            path = _resolve(str(args.get("path", ".")))
+            if path is None or not path.exists():
+                return _tool_text(f"no such path in workspace: {args.get('path')!r}", is_error=True)
+            # A failed run still counts. Otherwise a broken scanner is free to retry, and the
+            # agent — told the tool is available — burns its turn budget on it instead of
+            # falling back to read_file.
+            tracker.semgrep_runs += 1
+            findings, reason = await run_semgrep(path, root, settings)
+            if reason is not None:
+                return _tool_text(f"semgrep unavailable: {reason}", is_error=True)
+            tracker.static_findings.extend(findings[: tracker.max_semgrep_results])
+            return _tool_text(render_semgrep(findings, tracker.max_semgrep_results))
+
+    return [read_file, grep_repo, list_dir, run_semgrep_tool]
 
 
-def _make_server(root: Path, tracker: _Tracker) -> McpSdkServerConfig:
-    """Build the in-process MCP server exposing the three sandboxed tools."""
+def _make_server(root: Path, tracker: _Tracker, settings: Settings) -> McpSdkServerConfig:
+    """Build the in-process MCP server exposing the four sandboxed tools."""
     return create_sdk_mcp_server(
-        name=_SERVER_NAME, version="1.0.0", tools=_build_tools(root, tracker)
+        name=_SERVER_NAME, version="1.0.0", tools=_build_tools(root, tracker, settings)
     )
 
 
@@ -284,6 +321,8 @@ async def run_investigation(state: ReviewState, settings: Settings) -> Investiga
                 "gate.investigator.tool_calls": report.tool_calls_count,
                 "gate.cost.investigator_usd": report.cost_estimate_usd,
                 "gate.investigator.files_examined": len(report.files_examined),
+                "gate.investigator.semgrep_runs": report.semgrep_runs,
+                "gate.investigator.static_findings": len(report.static_analysis),
             }
         )
         return report
@@ -299,6 +338,8 @@ async def _run_investigation(
     tracker = _Tracker(
         max_tool_calls=settings.gate_investigator_max_tool_calls,
         max_file_chars=settings.gate_investigator_max_file_chars,
+        max_semgrep_runs=settings.gate_semgrep_max_runs,
+        max_semgrep_results=settings.gate_semgrep_max_results,
         span_context=trace.set_span_in_context(span),
     )
     if not root.is_dir():
@@ -324,7 +365,7 @@ async def _run_investigation(
                 settings.gate_model_investigator, settings.gate_model_investigator_effort
             ),
             system_prompt=_system_prompt(settings),
-            mcp_servers={_SERVER_NAME: _make_server(root, tracker)},
+            mcp_servers={_SERVER_NAME: _make_server(root, tracker, settings)},
             allowed_tools=_ALLOWED_TOOLS,
             max_turns=settings.gate_investigator_max_turns,
             # The SDK spawns the Claude Code CLI, which inherits os.environ -- and the key is
@@ -359,6 +400,8 @@ async def _run_investigation(
             files_examined=tracker.files_examined,
             tool_calls_count=tracker.tool_calls,
             cost_estimate_usd=cost,
+            static_analysis=tracker.static_findings,
+            semgrep_runs=tracker.semgrep_runs,
         )
 
     # Final structured-output turn: the loop gathered evidence; this distils it into the report.
@@ -373,6 +416,8 @@ async def _run_investigation(
             files_examined=tracker.files_examined,
             tool_calls_count=tracker.tool_calls,
             cost_estimate_usd=cost,
+            static_analysis=tracker.static_findings,
+            semgrep_runs=tracker.semgrep_runs,
         )
 
     return InvestigationReport(
@@ -381,4 +426,6 @@ async def _run_investigation(
         files_examined=tracker.files_examined,
         tool_calls_count=tracker.tool_calls,
         cost_estimate_usd=cost,
+        static_analysis=tracker.static_findings,
+        semgrep_runs=tracker.semgrep_runs,
     )

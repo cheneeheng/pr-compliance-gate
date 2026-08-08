@@ -81,6 +81,13 @@ class Settings(BaseSettings):
     gate_investigator_max_tool_calls: int = 15
     gate_investigator_max_file_chars: int = 15_000
 
+    # Semgrep, the investigator's fourth tool. Each run also counts against
+    # GATE_INVESTIGATOR_MAX_TOOL_CALLS — it is not exempt just because it is deterministic.
+    gate_semgrep_timeout_s: float = 60.0
+    gate_semgrep_max_results: int = 50
+    gate_semgrep_max_runs: int = 2  # re-running an unchanged tree is pure waste
+    gate_semgrep_rules_dir: Path | None = None  # overrides the asset-resolved default
+
 
 @lru_cache
 def get_settings() -> Settings:

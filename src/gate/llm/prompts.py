@@ -55,8 +55,12 @@ def investigator_system(max_turns: int, max_tool_calls: int) -> str:
     return f"""You are investigating specific open questions about a code change.
 
 Answer only those questions. Use the fewest tool calls that settle them. You have read-only
-tools scoped to the change's repository snapshot: read_file, grep_repo, list_dir. Stop when the
-questions are answered or genuinely unanswerable from the repository.
+tools scoped to the change's repository snapshot: read_file, grep_repo, list_dir, run_semgrep.
+Stop when the questions are answered or genuinely unanswerable from the repository.
+
+Tool guidance: when a question concerns code *behaviour* rather than repository structure, run
+run_semgrep once early, then read only the files it flags. Do not re-run it on an unchanged tree
+— it is deterministic, so a second run on the same files returns the same hits and buys nothing.
 
 Hard budgets for this investigation: at most {max_turns} turns and {max_tool_calls} tool calls
 in total; files are truncated when long. Plan for them — once a budget is spent the tools stop

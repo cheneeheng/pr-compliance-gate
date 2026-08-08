@@ -101,20 +101,91 @@ summary does not begin `investigation inconclusive:`.
 
 **Detection:** findings carry empty or implausible policy ids; risk reasons never mention policy.
 
-**Diagnosis:** the vector store is empty or stale.
+**Diagnosis:** the change's `change_type` maps to the wrong files, or to none. Retrieval is a
+deterministic lookup, so this is a config question, not a ranking one — read
+`data/policies/index.yaml` and check what that change type resolves to. A corpus that is *broken*
+cannot produce this symptom: the server would have refused to start.
 
-```bash
-uv run python -m gate.intake.ingest
-```
+**Remediation:** fix the mapping in `index.yaml` and restart. Keyword overrides match whole,
+case-folded tokens against the classifier's `touched_areas`, so `auth` matches "auth module" but
+deliberately not "author metadata".
 
-A printed count of `0` means no heading matched the policy id pattern — check that every policy
-heading is an `##` whose first token looks like `SEC-01`.
+**Verify:** a fresh review of `002_new_dependency` produces a license finding citing a `LIC-` id.
 
-**Remediation:** fix the headings, re-ingest. If you changed `GATE_EMBED_MODEL`, you **must**
-re-ingest: old vectors are not comparable with new ones.
+---
 
-**Verify:** the printed chunk count matches the number of `##` policy headings, and a fresh
-review of `002_new_dependency` produces a license finding citing a `LIC-` id.
+## The server refuses to start
+
+**Detection:** the process exits before `app_started`, with one of:
+
+| Message | Cause | Remediation |
+|---|---|---|
+| `policy index has no entry for change_type(s): …` | A change type is unmapped in `index.yaml`. | Add an entry. An empty list is valid; an absent key is not. |
+| `policy file 'x.md' is missing or unreadable` | `index.yaml` names a file that does not exist. | Fix the name or add the file. |
+| `heading '…' has no policy id` | A `##` heading does not start with an `XX-00` id. | Fix the heading; specialists cite that id. |
+| `… was written at GATE_STATE_VERSION=N but this build is version M` | The checkpoint schema changed under an existing database. | No migration exists for local demo data: back up `checkpoints.db` if the history matters, then delete it. |
+
+These are deliberate: a config error fails the *process*, not a review halfway through.
+
+---
+
+## A live pull request escalates instead of being reviewed
+
+**Detection:** the review sits at the human gate with every panel empty except **Escalation**.
+
+**Diagnosis:** read the reason.
+
+- `pr_too_large` — the PR has more changed files than `GATE_GH_MAX_FILES`. The gate refuses
+  rather than reviewing a subset; a compliance gate that silently misses files is worse than one
+  that stops.
+- `source_unavailable` — GitHub rate-limited the fetch after three jittered retries, or the
+  shallow clone failed. The detail text carries the underlying message.
+
+**Remediation:** for `pr_too_large`, split the PR or raise the cap deliberately. For
+`source_unavailable`, retry later; if it repeats, check the token and that `git` is on `PATH`.
+
+**Verify:** a re-run of the same URL reaches `classify` rather than short-circuiting.
+
+---
+
+## Traces do not appear in Langfuse
+
+**Detection:** reviews complete normally, but Langfuse is empty or the **View trace** link is
+missing.
+
+**Diagnosis:** in order —
+
+1. `GATE_OTEL_ENABLED=false` disables tracing entirely and omits the link by design.
+2. `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_HEADERS` carry **no** `GATE_` prefix. A
+   misspelling is silent: the exporter falls back to `localhost:4318`, which is often right
+   locally and wrong everywhere else.
+3. Traces that end mid-graph mean spans were dropped on shutdown. The app drains its background
+   runs before flushing the exporter, so this points at a hard kill (`SIGKILL`) rather than a
+   clean stop.
+
+**Remediation:** correct the variable names, restart, and stop the server gracefully.
+
+**Verify:** a fresh review of `001_docs_typo` produces a `gate.review.run` trace whose child spans
+include `gate.node.classify` and `gate.node.verdict`.
+
+---
+
+## Investigations report `semgrep unavailable`
+
+**Detection:** the investigation summary or static-analysis panel carries
+`semgrep unavailable: <reason>`.
+
+**Diagnosis:** the reason names it. `semgrep binary not available` means the optional extra is not
+installed. `unsupported event loop` means the server was started with `--reload`/`--workers`.
+`no ruleset at …` means `rules/` did not resolve — most likely a wheel built without it.
+
+**Remediation:** `uv sync --extra semgrep`; drop `--reload`; rebuild the wheel with `rules/` in the
+`force-include` map.
+
+**Verify:** a review of `003_auth_change` shows a non-empty **Static analysis** panel.
+
+> Not an outage. This degrades the investigator's evidence, it does not fail the review — which is
+> why it appears as a tool result rather than an error.
 
 ---
 
@@ -166,10 +237,10 @@ A review that was paused at the human gate can still be resumed by posting to
 
 ## Rollback and recovery
 
-- **Bad configuration change:** restore the previous `.env` values and restart. Nothing persisted
-  is affected by a configuration change except the vector store, which only `GATE_EMBED_MODEL` and
-  `GATE_CHROMA_DIR` touch.
-- **Corrupt vector store:** delete `.chroma/` and re-ingest. It holds only derived data.
+- **Bad configuration change:** restore the previous `.env` values and restart. No persisted state
+  is affected by a configuration change.
+- **Corrupt or oversized clone cache:** delete `data/workspaces/`. It holds only derived data and
+  is re-cloned on demand.
 - **Corrupt or unwanted checkpoint database:** stop the server, move `checkpoints.db` aside (do
   not delete it until you are sure), restart. See the warning in
   [`OP-03-routine-operations.md`](OP-03-routine-operations.md) — the blast radius is all review history,

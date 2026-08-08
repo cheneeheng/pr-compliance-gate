@@ -36,10 +36,10 @@ Within a folder, read in `HT-`/`OP-` order; each page assumes only what came bef
 
 ### Operations (operator)
 
-- [`OP-01`](operations/OP-01-install.md) — dependencies, API key, policy ingestion, health check.
+- [`OP-01`](operations/OP-01-install.md) — dependencies, API key, GitHub token, health check.
 - [`OP-02`](operations/OP-02-configure.md) — every setting: purpose, default, effect.
-- [`OP-03`](operations/OP-03-routine-operations.md) — start/stop, re-ingest policy, add a sample
-  PR, run the test suite.
+- [`OP-03`](operations/OP-03-routine-operations.md) — start/stop, edit the policy corpus, add a
+  sample PR, manage the clone cache, run the test suite.
 - [`OP-04`](operations/OP-04-monitoring.md) — logs, correlation IDs, cost signals, what healthy
   looks like.
 - [`OP-05`](operations/OP-05-incident-runbook.md) — detection → diagnosis → remediation for each
