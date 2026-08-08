@@ -24,7 +24,8 @@ from gate.errors import (
     ReviewNotFoundError,
 )
 from gate.graph.build import compile_graph
-from gate.graph.checkpoint import use_state_allowlist
+from gate.graph.checkpoint import check_state_version, use_state_allowlist
+from gate.intake.retrieval import validate_policy_index
 from gate.logging import configure_logging, get_logger, set_correlation_id
 
 log = get_logger(__name__)
@@ -40,6 +41,11 @@ _STATUS_FOR_ERROR: dict[type[GateError], int] = {
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging()
     settings = get_settings()
+    # Fail the process here rather than a review mid-run: a missing policy file or an unmapped
+    # change_type is a config error, and the classifier's closed enum means it cannot be a
+    # runtime condition worth surviving.
+    validate_policy_index(settings)
+    check_state_version(settings.gate_db_path, settings.gate_state_version)
     # Session-scoped registry of created reviews (thread_id -> pr_id). Checkpoints persist on
     # disk; this ordered map just backs the list view (see DECISION_LOG entry 5).
     app.state.reviews = OrderedDict()

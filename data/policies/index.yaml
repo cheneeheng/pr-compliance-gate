@@ -1,0 +1,25 @@
+# Which policy documents a change is reviewed against, keyed by Classification.change_type.
+#
+# Mapping lives in config, not code, so adding a policy file is a data edit. Every member of the
+# ChangeType enum must have an entry -- including `docs`, whose entry is deliberately empty rather
+# than absent. `validate_policy_index()` enforces that at startup: change_type is a closed enum the
+# classifier's structured output already validates, so a missing key is a config error, not a
+# condition to survive mid-review.
+#
+# Order matters: files are read in declaration order, and the resulting chunk order is what the
+# specialists see.
+by_change_type:
+  code: [security.md, licensing.md]
+  dependency: [licensing.md, security.md]
+  config: [security.md, data-handling.md]
+  data_handling: [data-handling.md, security.md]
+  docs: []
+
+# Additional files pulled in when a keyword matches any Classification.touched_areas entry.
+# Matching is whole-token and case-folded, never substring: `auth` matches "auth module" and
+# "auth" but not "author metadata".
+keyword_overrides:
+  auth: [security.md]
+  logging: [data-handling.md]
+  network: [security.md]
+  telemetry: [data-handling.md]

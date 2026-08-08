@@ -68,12 +68,17 @@ class Outcome(StrEnum):
 
 
 class PolicyChunk(BaseModel):
-    """A retrieved slice of a policy document."""
+    """A policy document section, split on its `##` heading and labelled with its policy id.
+
+    No similarity score: retrieval is a deterministic ``change_type`` -> file lookup, so there is
+    nothing to score. ``policy_id`` is the heading's leading token and is the single citation key
+    — a separate ``heading_id`` would be the same value under a second name, leaving specialists
+    two candidate fields to cite.
+    """
 
     text: str
     policy_id: str
     source_file: str
-    distance: float = 0.0  # retrieval score; 0.0 when not from a similarity query
 
 
 class Classification(BaseModel):

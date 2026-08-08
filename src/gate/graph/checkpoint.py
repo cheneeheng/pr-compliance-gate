@@ -13,12 +13,15 @@ serializer is constructed instead, which is what this module does.
 
 from __future__ import annotations
 
+import sqlite3
+from pathlib import Path
 from typing import Any
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.serde.base import maybe_add_typed_methods
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 
+from gate.errors import StateVersionError
 from gate.graph.state import CHECKPOINT_ALLOWLIST
 
 
@@ -33,3 +36,28 @@ def use_state_allowlist(saver: BaseCheckpointSaver[Any]) -> BaseCheckpointSaver[
         JsonPlusSerializer(allowed_msgpack_modules=CHECKPOINT_ALLOWLIST)
     )
     return saver
+
+
+def check_state_version(db_path: Path, version: int) -> None:
+    """Refuse to start against a checkpoint database written by an incompatible state schema.
+
+    The allowlist governs *which* types msgpack will reconstruct, not whether an old payload
+    still matches the current field set — a checkpoint carrying a since-removed field is still an
+    old checkpoint. There is deliberately no migration: this is local single-user demo data, so
+    the recorded version is a gate and the fix is deleting the file. Stamped on first use, so an
+    existing database from before this check reads as the current version exactly once.
+    """
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS gate_meta (key TEXT PRIMARY KEY, value TEXT)")
+        row = conn.execute("SELECT value FROM gate_meta WHERE key = 'state_version'").fetchone()
+        if row is None:
+            conn.execute(
+                "INSERT INTO gate_meta (key, value) VALUES ('state_version', ?)", (str(version),)
+            )
+            return
+        if int(row[0]) != version:
+            raise StateVersionError(
+                f"{db_path} was written at GATE_STATE_VERSION={row[0]} but this build is "
+                f"version {version}. There is no migration — delete {db_path} and re-run."
+            )

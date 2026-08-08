@@ -40,7 +40,7 @@ async def test_intake_loads_the_diff_and_changed_files() -> None:
 
 
 async def test_retrieve_policy_delegates_to_retrieval(monkeypatch: pytest.MonkeyPatch) -> None:
-    chunk = PolicyChunk(text="t", policy_id="SEC-01", source_file="security.md", distance=0.2)
+    chunk = PolicyChunk(text="t", policy_id="SEC-01", source_file="security.md")
     monkeypatch.setattr(retrieve_mod, "retrieve", lambda _c: [chunk])
     state = ReviewState(pr_id="t", classification=Classification(change_type="code", summary="s"))
     assert (await retrieve_policy(state))["policy_context"] == [chunk]

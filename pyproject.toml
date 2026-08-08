@@ -37,13 +37,13 @@ dependencies = [
     "langgraph-checkpoint-sqlite>=2.0",
     # Linear intake leg
     "langchain>=0.3",
-    # Direct import in intake/ingest.py — langchain no longer pulls it in transitively.
+    # Direct import in intake/retrieval.py — langchain no longer pulls it in transitively.
+    # Retained after the Chroma removal: the heading split is still how policy files become
+    # citable chunks.
     "langchain-text-splitters>=0.3",
     "langchain-anthropic>=0.3",
-    "langchain-chroma>=0.2",
-    "chromadb>=1.0",
-    "langchain-huggingface>=0.1",
-    "sentence-transformers>=3.0",
+    # Policy index (data/policies/index.yaml)
+    "pyyaml>=6.0",
     # Investigator harness (SDK is young; pin the minor at install time if its surface moves)
     "claude-agent-sdk>=0.1,<0.2",
     # API
@@ -62,6 +62,7 @@ dev = [
     "pytest-cov>=7.1",
     "ruff>=0.6",
     "mypy>=1.11",
+    "types-PyYAML>=6.0",
     "pip-audit>=2.7",
     "pre-commit>=4.0",
 ]
@@ -116,9 +117,6 @@ plugins = ["pydantic.mypy"]
 [[tool.mypy.overrides]]
 # Third-party packages without shipped type stubs.
 module = [
-    "langchain_chroma.*",
-    "langchain_huggingface.*",
-    "chromadb.*",
     "claude_agent_sdk.*",
     "langgraph.*",
     "langchain_anthropic.*",

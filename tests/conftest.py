@@ -19,7 +19,6 @@ def _test_env(tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
     tmp = tmp_path_factory.mktemp("gate")
     os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
     os.environ["GATE_DB_PATH"] = str(tmp / "checkpoints.db")
-    os.environ["GATE_CHROMA_DIR"] = str(tmp / "chroma")
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()

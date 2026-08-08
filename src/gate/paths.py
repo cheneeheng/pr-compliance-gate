@@ -12,6 +12,7 @@ ASSET_ROOT = _BUNDLED if _BUNDLED.is_dir() else Path(__file__).resolve().parents
 DATA_DIR = ASSET_ROOT / "data"
 SAMPLE_PRS_DIR = DATA_DIR / "sample_prs"
 POLICIES_DIR = DATA_DIR / "policies"
+POLICY_INDEX = POLICIES_DIR / "index.yaml"
 STATIC_DIR = ASSET_ROOT / "static"
 
 

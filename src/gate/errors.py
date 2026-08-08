@@ -17,3 +17,14 @@ class ReviewNotFoundError(GateError):
 
 class NoPendingDecisionError(GateError):
     """The thread is not interrupted at the human gate. Maps to HTTP 409."""
+
+
+class PolicyIndexError(GateError):
+    """The policy index or corpus is missing, malformed, or has an unlabelled heading.
+
+    Raised at startup by ``validate_policy_index``, so it fails the process rather than a review.
+    """
+
+
+class StateVersionError(GateError):
+    """The checkpoint database was written by an incompatible ``GATE_STATE_VERSION``."""

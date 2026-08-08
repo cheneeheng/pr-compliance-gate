@@ -29,7 +29,13 @@ class Settings(BaseSettings):
 
     # Storage
     gate_db_path: Path = Path("checkpoints.db")
-    gate_chroma_dir: Path = Path(".chroma")
+    # Schema generation of `ReviewState` as checkpointed. Bumped only by a *narrowing* change (a
+    # removed or retyped field); purely additive fields with defaults still deserialize. The
+    # lifespan refuses to start against a `checkpoints.db` recorded at a different version.
+    gate_state_version: int = 2
+    # Overrides the asset-resolved default (`gate.paths.POLICY_INDEX`) rather than replacing the
+    # resolution, so an installed wheel still finds its bundled copy when this is unset.
+    gate_policy_index: Path | None = None
 
     # Model tiers
     gate_model_classifier: str = "claude-haiku-4-5"
@@ -38,7 +44,6 @@ class Settings(BaseSettings):
     gate_model_specialist_effort: ModelEffort = "high"
     gate_model_investigator: str = "claude-sonnet-5"
     gate_model_investigator_effort: ModelEffort = "high"
-    gate_embed_model: str = "sentence-transformers/all-MiniLM-L6-v2"
 
     # Risk gate + orchestration budgets
     gate_risk_threshold: int = 40
@@ -51,9 +56,6 @@ class Settings(BaseSettings):
     gate_investigator_max_turns: int = 8
     gate_investigator_max_tool_calls: int = 15
     gate_investigator_max_file_chars: int = 15_000
-
-    # Chroma collection name for policy chunks
-    policy_collection: str = "policies"
 
 
 @lru_cache

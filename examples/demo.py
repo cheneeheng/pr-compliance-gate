@@ -11,7 +11,6 @@ no server is needed.
 
 Prerequisites (real Anthropic API calls):
     cp .env.example .env            # then set ANTHROPIC_API_KEY
-    uv run python -m gate.intake.ingest   # one-time: embed the policy corpus
 
 Run:
     uv run python examples/demo.py                 # all three beats
@@ -159,8 +158,7 @@ async def _run(only: str | None) -> int:
     settings = get_settings()
     if not settings.anthropic_api_key:
         print(
-            "ANTHROPIC_API_KEY is not set. Copy .env.example to .env, set the key, then run:\n"
-            "  uv run python -m gate.intake.ingest   # one-time policy ingest",
+            "ANTHROPIC_API_KEY is not set. Copy .env.example to .env and set the key.",
             file=sys.stderr,
         )
         return 1

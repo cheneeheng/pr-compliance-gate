@@ -1,9 +1,9 @@
 """Behavioral eval: the full three-fixture demo arc, driven through the API (ITER_04 §06).
 
-Marked ``llm`` — spins the real graph, hits the real Anthropic API, and needs the policy corpus
-ingested first (``uv run python -m gate.intake.ingest``). Asserts each fixture's terminal
-``verdict.outcome`` matches ``expected_outcome`` in its ``meta.json``. ``eval_routes`` covers the
-complementary half: the route each fixture takes to its first resting point.
+Marked ``llm`` — spins the real graph, hits the real Anthropic API, and needs a policy corpus
+that passes ``validate_policy_index``. Asserts each fixture's terminal ``verdict.outcome`` matches
+``expected_outcome`` in its ``meta.json``. ``eval_routes`` covers the complementary half: the
+route each fixture takes to its first resting point.
 """
 
 from __future__ import annotations
