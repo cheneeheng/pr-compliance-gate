@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -48,6 +48,10 @@ class EscalationReason(StrEnum):
     timeout = "timeout"
     disagreement = "disagreement"
     max_cycles = "max_cycles"
+    # Raised by `PRSource.load` before the graph has a diff, and routed by the intake
+    # short-circuit rather than by reconcile (which only runs after the specialists).
+    pr_too_large = "pr_too_large"
+    source_unavailable = "source_unavailable"
 
 
 class DecisionAction(StrEnum):
@@ -79,6 +83,18 @@ class PolicyChunk(BaseModel):
     text: str
     policy_id: str
     source_file: str
+
+
+class PRRef(BaseModel):
+    """Identity of a live pull request, resolved before a review thread exists."""
+
+    owner: str
+    repo: str
+    number: int
+    head_sha: str
+    base_sha: str = ""
+    html_url: str = ""
+    title: str = ""
 
 
 class Classification(BaseModel):
@@ -189,6 +205,16 @@ class ReviewState(BaseModel):
     # nothing from one node carrying a special responsibility. It is a `str`, so the checkpoint
     # allowlist is untouched and GATE_STATE_VERSION stays at 2.
     trace_id: str | None = None
+    # Where the PR came from. All three of these are additive with defaults, so a checkpoint
+    # written earlier in the v2 family still deserializes and GATE_STATE_VERSION stays at 2 —
+    # it exists for the one *narrowing* in this family, and bumping it for purely additive
+    # fields would force a pointless `checkpoints.db` delete and train readers to ignore it.
+    source: Literal["fixture", "github"] = "fixture"
+    pr_ref: PRRef | None = None
+    # The investigator's sandbox root, injected by the adapter rather than derived from `pr_id`.
+    # Null when `load` failed before materializing anything — a non-optional `str` would force an
+    # empty-string sentinel that the sandbox check would then have to special-case.
+    workspace_path: str | None = None
     diff: str = ""
     files_changed: list[str] = Field(default_factory=list)
     policy_context: list[PolicyChunk] = Field(default_factory=list)
@@ -225,6 +251,7 @@ CHECKPOINT_ALLOWLIST: tuple[tuple[str, str], ...] = tuple(
         "DecisionAction",
         "Outcome",
         "PolicyChunk",
+        "PRRef",
         "Classification",
         "RiskAssessment",
         "Finding",

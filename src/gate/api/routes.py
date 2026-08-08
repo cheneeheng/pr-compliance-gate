@@ -16,8 +16,9 @@ from pydantic import BaseModel, ConfigDict
 
 from gate.config import get_settings
 from gate.errors import NoPendingDecisionError, ReviewNotFoundError
-from gate.graph.state import DecisionAction, initial_state
-from gate.intake.loader import list_prs, load_pr
+from gate.graph.state import DecisionAction, PRRef, initial_state
+from gate.intake.loader import list_prs
+from gate.intake.sources import select_source
 from gate.logging import get_logger
 from gate.paths import STATIC_DIR
 from gate.telemetry.tracing import (
@@ -32,8 +33,25 @@ router = APIRouter()
 
 
 class StartReview(BaseModel):
+    """Exactly one of the two. `select_source` enforces that and raises the 422."""
+
     model_config = ConfigDict(extra="forbid")
+    pr_id: str | None = None
+    pr_url: str | None = None
+
+
+class Registration(BaseModel):
+    """What the session-scoped registry remembers about a thread.
+
+    Recorded at registration time — before the first checkpoint exists — so `GET /api/reviews`
+    lists a live review with its badge during the clone window. The v1 first-review race fix (a
+    known thread reads as `running` until its first checkpoint) covers that longer window
+    unchanged.
+    """
+
     pr_id: str
+    source: str
+    pr_ref: PRRef | None = None
 
 
 class DecisionBody(BaseModel):
@@ -99,17 +117,38 @@ async def get_prs() -> list[dict[str, Any]]:
 
 @router.post("/api/reviews")
 async def start_review(body: StartReview, request: Request) -> dict[str, str]:
-    load_pr(body.pr_id)  # validate up front: FixtureError -> 422, no half-created thread
+    """Preflight synchronously, then hand the slow half to the background task.
+
+    The preflight (`resolve`) is bounded — a fixture directory check, or one MCP metadata round
+    trip — and it is what makes a bad URL, a missing repo or a token without scope an HTTP error
+    *before* a thread exists. Everything retryable (pagination, diff fetch, clone, the graph run)
+    happens after, where failures are escalations because a thread already exists to carry them.
+    """
+    source, ref_input = select_source(body.pr_id, body.pr_url)
+    ref = await source.resolve(ref_input)
+    # The display and lookup key: a fixture directory name, or `{owner}/{repo}#{number}` for a
+    # live PR so existing list/detail rendering keeps working with no null handling. Never a path
+    # component — the `head_sha` regex is what guards the live path.
+    pr_id = f"{ref.owner}/{ref.repo}#{ref.number}" if ref else str(body.pr_id)
     thread_id = str(uuid4())
-    request.app.state.reviews[thread_id] = body.pr_id
+    request.app.state.reviews[thread_id] = Registration(
+        pr_id=pr_id, source=source.source_name, pr_ref=ref
+    )
     graph = request.app.state.graph
 
     async def _invoke(trace_id: str | None) -> Any:
-        state = initial_state(body.pr_id, thread_id)
+        payload = await source.load(ref_input, ref)
+        state = initial_state(payload.pr_id, thread_id)
         state.trace_id = trace_id  # seeded before ainvoke, so it is in the first checkpoint
+        state.source = source.source_name
+        state.pr_ref = payload.ref
+        state.workspace_path = payload.workspace_path
+        state.diff = payload.diff
+        state.files_changed = payload.files_changed
+        state.escalation = payload.escalation
         return await graph.ainvoke(state, _config(thread_id))
 
-    _spawn(request, _invoke, pr_id=body.pr_id, thread_id=thread_id)
+    _spawn(request, _invoke, pr_id=pr_id, thread_id=thread_id)
     return {"thread_id": thread_id}
 
 
@@ -117,7 +156,7 @@ async def start_review(body: StartReview, request: Request) -> dict[str, str]:
 async def list_reviews(request: Request) -> list[dict[str, Any]]:
     graph = request.app.state.graph
     out: list[dict[str, Any]] = []
-    for thread_id, pr_id in request.app.state.reviews.items():
+    for thread_id, registration in request.app.state.reviews.items():
         snapshot = await graph.aget_state(_config(thread_id))
         values = snapshot.values or {}
         risk = values.get("risk")
@@ -126,7 +165,8 @@ async def list_reviews(request: Request) -> list[dict[str, Any]]:
         out.append(
             {
                 "thread_id": thread_id,
-                "pr_id": pr_id,
+                "pr_id": registration.pr_id,
+                "source": registration.source,
                 "status": _derive_status(values, snapshot),
                 "risk_level": risk_level,
             }
@@ -142,10 +182,17 @@ async def get_review(thread_id: str, request: Request) -> dict[str, Any]:
         # A review is registered before its background run writes the first checkpoint, and the
         # UI polls as soon as POST returns. Report a known thread as running rather than 404 --
         # the page stops polling on a 404, so the race would strand the very first review.
-        pr_id = request.app.state.reviews.get(thread_id)
-        if pr_id is None:
+        registration = request.app.state.reviews.get(thread_id)
+        if registration is None:
             raise ReviewNotFoundError(f"no review for thread {thread_id}")
-        return {"status": "running", "thread_id": thread_id, "pr_id": pr_id, **_ui_config()}
+        return {
+            "status": "running",
+            "thread_id": thread_id,
+            "pr_id": registration.pr_id,
+            "source": registration.source,
+            "pr_ref": registration.pr_ref.model_dump() if registration.pr_ref else None,
+            **_ui_config(),
+        }
     return {"status": _derive_status(values, snapshot), **values, **_ui_config()}
 
 
@@ -182,7 +229,8 @@ async def submit_decision(thread_id: str, body: DecisionBody, request: Request) 
         raise ReviewNotFoundError(f"no review for thread {thread_id}")
     if not _pending_interrupts(snapshot):
         raise NoPendingDecisionError("no pending decision")  # 409; double-submits land here too
-    pr_id = request.app.state.reviews.get(thread_id, snapshot.values.get("pr_id", ""))
+    registration = request.app.state.reviews.get(thread_id)
+    pr_id = registration.pr_id if registration else snapshot.values.get("pr_id", "")
 
     async def _invoke(_trace_id: str | None) -> Any:
         # The resumed leg gets its own root run span, but `trace_id` in state is left at the

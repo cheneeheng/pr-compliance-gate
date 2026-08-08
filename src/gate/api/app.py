@@ -21,12 +21,16 @@ from gate.config import get_settings
 from gate.errors import (
     FixtureError,
     GateError,
+    InvalidPRRefError,
     NoPendingDecisionError,
     ReviewNotFoundError,
+    SourceForbiddenError,
+    SourceNotFoundError,
 )
 from gate.graph.build import compile_graph
 from gate.graph.checkpoint import check_state_version, use_state_allowlist
 from gate.intake.retrieval import validate_policy_index
+from gate.intake.workspace import evict_lru
 from gate.logging import configure_logging, get_logger, set_correlation_id
 from gate.telemetry.tracing import init_tracing, shutdown_tracing
 
@@ -34,7 +38,10 @@ log = get_logger(__name__)
 
 _STATUS_FOR_ERROR: dict[type[GateError], int] = {
     FixtureError: 422,
+    InvalidPRRefError: 422,
+    SourceForbiddenError: 403,
     ReviewNotFoundError: 404,
+    SourceNotFoundError: 404,
     NoPendingDecisionError: 409,
 }
 
@@ -48,6 +55,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # runtime condition worth surviving.
     validate_policy_index(settings)
     check_state_version(settings.gate_db_path, settings.gate_state_version)
+    evict_lru(settings)  # a clone cache left oversized by a crashed run is trimmed on start
     # Session-scoped registry of created reviews (thread_id -> pr_id). Checkpoints persist on
     # disk; this ordered map just backs the list view (see DECISION_LOG entry 5).
     app.state.reviews = OrderedDict()

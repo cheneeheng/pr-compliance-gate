@@ -1,7 +1,9 @@
 """Graph wiring: nodes, conditional edges, fan-out/fan-in, checkpointer.
 
 Flow:
-    START -> intake -> classify -> retrieve_policy -> risk_score
+    START -> intake
+    intake --(escalation seeded by a failed load)--> human_gate   (intake short-circuit)
+    intake --(else)--> classify -> retrieve_policy -> risk_score
     risk_score --(score < threshold)--> verdict            (cost gate #1: no Sonnet spend)
     risk_score --(else)--> {security_specialist, license_specialist}  (parallel fan-out)
     {specialists} -> reconcile                              (fan-in via the merge reducer)
@@ -43,6 +45,19 @@ from gate.graph.state import DecisionAction, ReviewState
 _SPECIALISTS = ["security_specialist", "license_specialist"]
 
 
+def _route_after_intake(state: ReviewState) -> str:
+    """The only edge the v2 family adds.
+
+    An escalation raised by ``load`` (``pr_too_large`` / ``source_unavailable``) exists before the
+    graph has a diff, and reconcile's rule 1 only fires *after* classify, risk and the specialists
+    have run. Routing a diff-less review down that path means asking Haiku to classify nothing and
+    Sonnet to review nothing: spend and noise on a review whose outcome is already decided. Rule 1
+    is unmodified and still catches escalations raised mid-graph — it is just not early enough to
+    be free.
+    """
+    return "human_gate" if state.escalation is not None else "classify"
+
+
 def _route_after_risk(state: ReviewState) -> list[str] | str:
     settings = get_settings()
     if state.risk is not None and state.risk.score < settings.gate_risk_threshold:
@@ -80,7 +95,9 @@ def build_graph_builder() -> StateGraph[ReviewState]:
         builder.add_node(name, traced_node(fn))
 
     builder.add_edge(START, "intake")
-    builder.add_edge("intake", "classify")
+    builder.add_conditional_edges(
+        "intake", _route_after_intake, {"classify": "classify", "human_gate": "human_gate"}
+    )
     builder.add_edge("classify", "retrieve_policy")
     builder.add_edge("retrieve_policy", "risk_score")
 

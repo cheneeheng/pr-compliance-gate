@@ -18,6 +18,7 @@ from gate.llm.models import (
     specialist_model,
     structured_call,
     truncate_diff,
+    truncate_diff_by_file,
 )
 
 _SETTINGS = Settings(
@@ -59,6 +60,35 @@ def test_effort_follows_the_configured_id_not_the_tier() -> None:
     settings = _SETTINGS.model_copy(update={"gate_model_specialist": "claude-haiku-4-5"})
     assert specialist_model(settings).reasoning_effort is None
     assert effort_for("claude-opus-5", "xhigh") == "xhigh"
+
+
+_TWO_FILE_DIFF = (
+    "diff --git a/small.py b/small.py\n@@\n+x = 1\n"
+    "diff --git a/big.py b/big.py\n@@\n" + "+padding\n" * 200
+)
+
+
+def test_a_large_diff_is_cut_at_file_boundaries_and_names_what_it_dropped() -> None:
+    """Real PRs are larger and noisier than fixtures. Whole hunks reach the model, and a
+    specialist can flag "I could not see X" instead of judging in ignorance."""
+    result = truncate_diff_by_file(_TWO_FILE_DIFF, 200)
+
+    assert "small.py" in result
+    assert "1 file(s) omitted for size: big.py" in result
+    assert "+padding" not in result  # dropped whole, not sliced mid-hunk
+
+
+def test_a_diff_inside_the_budget_is_untouched() -> None:
+    assert truncate_diff_by_file(_TWO_FILE_DIFF, 100_000) == _TWO_FILE_DIFF
+
+
+def test_a_single_oversized_file_falls_back_to_the_blunt_cut() -> None:
+    """Dropping the only file would leave nothing to review; a head+tail cut beats an empty diff."""
+    single = "diff --git a/only.py b/only.py\n@@\n" + "+line\n" * 500
+
+    result = truncate_diff_by_file(single, 200)
+
+    assert "truncated" in result and len(result) < len(single)
 
 
 def test_the_cheap_tier_gets_a_smaller_output_budget() -> None:

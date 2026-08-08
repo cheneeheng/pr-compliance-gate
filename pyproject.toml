@@ -46,6 +46,11 @@ dependencies = [
     "pyyaml>=6.0",
     # Investigator harness (SDK is young; pin the minor at install time if its surface moves)
     "claude-agent-sdk>=0.1,<0.2",
+    # Live PR intake: client for the GitHub MCP server, launched as a stdio subprocess from
+    # config. Minor pinned — the SDK surface still moves. No git library: the shallow clone is a
+    # fixed-argv `create_subprocess_exec`, which avoids a dependency and keeps the "no shell"
+    # invariant intact.
+    "mcp>=1.9,<2",
     # Tracing. OTLP over HTTP, not gRPC: one fewer transport dependency, and Langfuse's
     # ingestion is HTTP. The Langfuse SDK is deliberately NOT a dependency — Langfuse is
     # addressed purely as an OTLP endpoint, which is what keeps the instrumentation
@@ -126,6 +131,7 @@ plugins = ["pydantic.mypy"]
 # Third-party packages without shipped type stubs.
 module = [
     "claude_agent_sdk.*",
+    "mcp.*",
     "langgraph.*",
     "langchain_anthropic.*",
     "langchain_text_splitters.*",
@@ -139,8 +145,9 @@ asyncio_mode = "auto"
 python_files = ["test_*.py", "eval_*.py"]
 markers = [
     "llm: tests that make real Anthropic API calls (excluded from the default run)",
+    "network: tests that reach a third-party service, e.g. GitHub (excluded from the default run)",
 ]
-addopts = "-m 'not llm'"
+addopts = "-m 'not llm and not network'"
 
 [tool.coverage.run]
 source = ["gate"]

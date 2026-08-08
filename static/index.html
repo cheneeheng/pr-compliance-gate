@@ -37,6 +37,10 @@
     .muted { color: var(--muted); }
     .banner { background: #3a1c1c; border: 1px solid var(--block); color: #ffb4a8; padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; }
     .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+    fieldset.toolbar { border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; }
+    fieldset.toolbar legend { font-size: 13px; padding: 0 6px; }
+    label { display: inline-flex; align-items: center; gap: 6px; }
+    input:disabled, select:disabled { opacity: 0.5; }
     .row { display: flex; gap: 16px; flex-wrap: wrap; }
     .row > div { flex: 1; min-width: 160px; }
     dl { margin: 0; } dt { color: var(--muted); font-size: 13px; } dd { margin: 0 0 8px; }
@@ -91,18 +95,31 @@
       const rows = reviews.map((r) => `
         <tr>
           <td><button type="button" class="link" data-thread="${esc(r.thread_id)}">${esc(r.pr_id)}</button></td>
+          <td>${sourceBadge(r.source)}</td>
           <td><span class="badge ${esc(r.status)}">${esc(r.status)}</span></td>
           <td>${r.risk_level ? esc(r.risk_level) : "—"}</td>
         </tr>`).join("");
 
       view.innerHTML = `
-        <div class="toolbar">
+        <fieldset class="toolbar">
+          <legend class="muted">Start a review</legend>
+          <label><input type="radio" name="mode" value="fixture" checked /> Sample PR</label>
           <select id="pr-select" aria-label="Sample PR">${options}</select>
+          <label><input type="radio" name="mode" value="github" /> GitHub PR URL</label>
+          <input id="pr-url" type="url" size="42" aria-label="GitHub PR URL"
+                 placeholder="https://github.com/owner/repo/pull/123" disabled />
           <button class="primary" id="start-btn">Start review</button>
-        </div>
-        ${reviews.length ? `<table><thead><tr><th>PR</th><th>Status</th><th>Risk</th></tr></thead><tbody>${rows}</tbody></table>`
+        </fieldset>
+        ${reviews.length ? `<table><thead><tr><th>PR</th><th>Source</th><th>Status</th><th>Risk</th></tr></thead><tbody>${rows}</tbody></table>`
                          : `<p class="muted">No reviews yet — start one above.</p>`}`;
 
+      view.querySelectorAll('input[name="mode"]').forEach((radio) => {
+        radio.onchange = () => {
+          const live = selectedMode() === "github";
+          document.getElementById("pr-url").disabled = !live;
+          document.getElementById("pr-select").disabled = live;
+        };
+      });
       document.getElementById("start-btn").onclick = startReview;
       view.querySelectorAll("[data-thread]").forEach((a) => { a.onclick = () => renderDetail(a.dataset.thread); });
       pollTimer = setInterval(async () => {
@@ -115,17 +132,32 @@
       document.querySelectorAll("[data-thread]").forEach((a) => {
         const r = map[a.dataset.thread]; if (!r) return;
         const tr = a.closest("tr");
-        tr.children[1].innerHTML = `<span class="badge ${esc(r.status)}">${esc(r.status)}</span>`;
-        tr.children[2].textContent = r.risk_level || "—";
+        tr.children[2].innerHTML = `<span class="badge ${esc(r.status)}">${esc(r.status)}</span>`;
+        tr.children[3].textContent = r.risk_level || "—";
       });
     }
 
+    const selectedMode = () => document.querySelector('input[name="mode"]:checked').value;
+    const sourceBadge = (source) => `<span class="badge">${esc(source || "fixture")}</span>`;
+
+    // Same regex intent as the server, so an obvious typo does not cost a round trip. The server
+    // remains the authority and its 422 renders in the existing red banner.
+    const PR_URL_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+\/?$/;
+
     async function startReview() {
-      const pr_id = document.getElementById("pr-select").value;
+      const live = selectedMode() === "github";
+      const pr_url = document.getElementById("pr-url").value.trim();
+      if (live && !PR_URL_RE.test(pr_url)) {
+        showError("Expected https://github.com/{owner}/{repo}/pull/{number}");
+        return;
+      }
+      const body = live ? { pr_url } : { pr_id: document.getElementById("pr-select").value };
       const btn = document.getElementById("start-btn");
+      // A live PR costs one MCP round trip where a fixture was instant; the clone runs after,
+      // in the background, so the review simply sits in `running` with its source badge.
       btn.disabled = true; btn.textContent = "Starting…";
       try {
-        const { thread_id } = await api("/api/reviews", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pr_id }) });
+        const { thread_id } = await api("/api/reviews", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
         clearError();
         renderDetail(thread_id);
       } catch (e) {
@@ -141,6 +173,12 @@
     // Omitted entirely when tracing is off, rather than rendered disabled: the disabled
     // convention is for controls whose backend arrives in a later iteration, and a permanently
     // dead button is worse than no button.
+    function prTitleLink(s) {
+      const ref = s.pr_ref;
+      if (!ref || !ref.html_url) return "";
+      return `<a href="${esc(ref.html_url)}" target="_blank" rel="noopener">${esc(ref.title || ref.html_url)}</a>`;
+    }
+
     function traceLink(s) {
       if (!s.trace_id || !s.langfuse_ui_base) return "";
       const href = `${s.langfuse_ui_base.replace(/\/$/, "")}/traces/${encodeURIComponent(s.trace_id)}`;
@@ -157,6 +195,23 @@
           ${f.needs_more_context ? ' <em class="muted">(needs context)</em>' : ""}</li>`).join("")}</ul></div>`).join("");
     }
 
+    // The empty state keys off semgrep_runs, not off the list. `static_analysis` defaults to [],
+    // so an empty list alone cannot tell "ran and found nothing" from "never ran" — and that is
+    // exactly the distinction a reviewer needs: one means the change is clean, the other means
+    // the evidence is missing. A failed run counts, so it lands in the "no findings" case and
+    // the reason reaches the reviewer through the investigation summary.
+    function staticAnalysisHtml(inv) {
+      if (!inv.semgrep_runs) return `<span class="muted">—</span>`;
+      const rows = inv.static_analysis || [];
+      if (!rows.length) return `<span class="muted">no static findings</span>`;
+      const byPath = {};
+      rows.forEach((f) => { (byPath[f.path] ||= []).push(f); });
+      return Object.entries(byPath).map(([path, fs]) => `
+        <div><strong>${esc(path)}</strong><ul>${fs.map((f) => `
+          <li><span class="sev-${esc(f.severity)}">${esc(f.severity)}</span> · ${esc(f.rule_id)}
+          (line ${esc(f.line)}) — ${esc(f.message)}</li>`).join("")}</ul></div>`).join("");
+    }
+
     function renderDetailFromState(s) {
       const view = document.getElementById("view");
       const c = s.classification, r = s.risk, inv = s.investigation, esc_ = s.escalation, v = s.verdict;
@@ -164,13 +219,15 @@
         <div class="toolbar">
           <button type="button" class="link" id="back">← Reviews</button>
           <span class="badge ${esc(s.status)}">${esc(s.status)}</span>
+          ${sourceBadge(s.source)}
           <span class="muted">${esc(s.pr_id)}</span>
+          ${prTitleLink(s)}
           ${traceLink(s)}
         </div>
         ${panel("Classification", orDash(c, (c) => `<dl><dt>Type</dt><dd>${esc(c.change_type)}</dd><dt>Summary</dt><dd>${esc(c.summary)}</dd><dt>Touched areas</dt><dd>${esc((c.touched_areas || []).join(", ")) || "—"}</dd></dl>`))}
         ${panel("Risk", orDash(r, (r) => `<div class="row"><div><dt>Score</dt><dd>${esc(r.score)}</dd></div><div><dt>Level</dt><dd>${esc(r.level)}</dd></div><div><dt>Model</dt><dd>${esc(r.model_used)}</dd></div></div><dt>Reasons</dt><dd><ul>${(r.reasons || []).map((x) => `<li>${esc(x)}</li>`).join("") || "—"}</ul></dd>`))}
         ${panel("Findings", findingsHtml(s.specialist_findings))}
-        ${panel("Investigation", orDash(inv, (i) => `<dl><dt>Summary</dt><dd><pre>${esc(i.summary)}</pre></dd><dt>Tool calls</dt><dd>${esc(i.tool_calls_count)}</dd><dt>Cost estimate</dt><dd>$${Number(i.cost_estimate_usd || 0).toFixed(4)}</dd><dt>Files examined</dt><dd>${esc((i.files_examined || []).join(", ")) || "—"}</dd></dl>`))}
+        ${panel("Investigation", orDash(inv, (i) => `<dl><dt>Summary</dt><dd><pre>${esc(i.summary)}</pre></dd><dt>Budget</dt><dd>${esc(i.tool_calls_count)} tool call(s) · ${esc(i.semgrep_runs || 0)} semgrep run(s) · $${Number(i.cost_estimate_usd || 0).toFixed(4)}</dd><dt>Files examined</dt><dd>${esc((i.files_examined || []).join(", ")) || "—"}</dd><dt>Static analysis</dt><dd>${staticAnalysisHtml(i)}</dd></dl>`))}
         ${panel("Escalation", orDash(esc_, (e) => `<span class="sev-warn">${esc(e.reason)}</span> — ${esc(e.detail)}`))}
         ${panel("Verdict", orDash(v, (v) => `<strong>${esc(v.outcome)}</strong><br/>${esc(v.rationale)}`))}
         <div id="decision-slot"></div>`;

@@ -8,6 +8,7 @@ and no node ever constructs raw messages itself.
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from langchain_anthropic import ChatAnthropic
@@ -171,3 +172,35 @@ def truncate_diff(diff: str, max_chars: int) -> str:
     half = max_chars // 2
     dropped = len(diff) - 2 * half
     return f"{diff[:half]}\n[... truncated {dropped} chars ...]\n{diff[-half:]}"
+
+
+def truncate_diff_by_file(diff: str, max_chars: int) -> str:
+    """Assemble a diff file-by-file until the budget is reached, rather than slicing mid-hunk.
+
+    Real pull requests are larger and noisier than fixtures, so the budget bites more often. The
+    strategy is unchanged in spirit — the same ``GATE_MAX_DIFF_CHARS`` cap — but the classifier
+    and specialists now always see *whole* hunks, and the files the budget dropped are named in
+    the trailing marker so a specialist can flag "I could not see X" instead of judging in
+    ignorance.
+    """
+    if len(diff) <= max_chars:
+        return diff
+    sections = re.split(r"(?m)^(?=diff --git )", diff)
+    kept: list[str] = []
+    dropped: list[str] = []
+    used = 0
+    for section in sections:
+        header = re.match(r"diff --git a/.+ b/(.+)", section)
+        name = header.group(1) if header else "(preamble)"
+        if header is not None and used + len(section) > max_chars:
+            dropped.append(name)
+            continue
+        kept.append(section)
+        used += len(section)
+    body = "".join(kept)
+    if not body.strip() or not dropped:
+        # Either nothing survived (one file bigger than the whole budget) or nothing could be
+        # dropped (no `diff --git` headers at all). An empty diff — or a still-oversized one —
+        # is useless to a specialist, so fall back to the blunt head+tail cut.
+        return truncate_diff(diff, max_chars)
+    return f"{body}\n[... {len(dropped)} file(s) omitted for size: {', '.join(dropped)} ...]"

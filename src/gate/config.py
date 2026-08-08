@@ -65,6 +65,17 @@ class Settings(BaseSettings):
     # Used only to build the UI's trace deep-link; server config, never review state.
     gate_langfuse_ui_base: str = "http://localhost:3000"
 
+    # Live GitHub intake. The token is a read-only PAT with `contents:read` +
+    # `pull_requests:read`. No write scopes: the gate never comments, labels or merges. That is a
+    # security posture, not an omission.
+    gate_github_token: str = ""
+    gate_gh_mcp_command: str = "npx -y @modelcontextprotocol/server-github"
+    gate_gh_max_files: int = 300
+    # Clone cache. Resolved to a writable location, never inside `gate/_bundled/` — an installed
+    # wheel's package directory may be read-only, and a clone cache does not belong in it.
+    gate_workspace_dir: Path = Path("data/workspaces")
+    gate_workspace_max_gb: float = 5.0
+
     # Investigator sub-agent budgets
     gate_investigator_max_turns: int = 8
     gate_investigator_max_tool_calls: int = 15

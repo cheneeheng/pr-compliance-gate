@@ -129,6 +129,8 @@ def test_a_started_review_reads_as_running_before_its_first_checkpoint() -> None
         "status": "running",
         "thread_id": thread_id,
         "pr_id": "001_docs_typo",
+        "source": "fixture",
+        "pr_ref": None,
         # Empty because the default suite runs with GATE_OTEL_ENABLED=false, which is exactly
         # what makes the UI omit the "View trace" link rather than render a dead one.
         "langfuse_ui_base": "",

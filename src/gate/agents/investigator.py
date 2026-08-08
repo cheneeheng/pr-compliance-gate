@@ -1,8 +1,9 @@
 """Autonomous investigator sub-agent (Claude Agent SDK).
 
 LangGraph sees one node (``investigate``) with one entry and one exit; the Agent SDK owns the
-inner tool loop. The agent gets three read-only, sandboxed tools over the change's repo snapshot
-and hard budgets on turns, tool calls, and per-file bytes. Budget exhaustion or SDK error never
+inner tool loop. The agent gets three read-only, sandboxed tools over the change's workspace — a
+fixture snapshot or a live PR's clone — and hard budgets on turns, tool calls, and per-file
+bytes. Budget exhaustion or SDK error never
 raises into the graph — it returns an inconclusive report, so failure lands on a human at the
 gate, never in a stack trace.
 
@@ -14,8 +15,6 @@ extraction below is duck-typed on purpose to tolerate minor surface drift.
 
 from __future__ import annotations
 
-import asyncio
-import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -39,6 +38,7 @@ from gate.llm.models import effort_for, estimate_cost, investigator_model, struc
 from gate.llm.prompts import investigator_system
 from gate.logging import get_logger
 from gate.paths import repo_snapshot_dir
+from gate.runtime import UNSUPPORTED_LOOP_REASON, loop_supports_subprocess
 from gate.telemetry.tracing import run_context, tracer
 
 log = get_logger(__name__)
@@ -271,20 +271,6 @@ async def _summarize(
     )
 
 
-def _loop_can_spawn_subprocess() -> bool:
-    """Whether the running loop can start the CLI the SDK drives.
-
-    Windows' ``SelectorEventLoop`` cannot: it raises a bare ``NotImplementedError`` whose message
-    is empty, which the SDK reports as ``Failed to start Claude Code:`` with nothing after it.
-    ``uvicorn --reload`` selects exactly that loop (``uvicorn/loops/asyncio.py``, where
-    ``use_subprocess`` — set by ``--reload`` — forces ``SelectorEventLoop`` even on Windows), so
-    the recommended dev command used to disable the investigator with an unreadable error.
-    """
-    if sys.platform != "win32":
-        return True
-    return not isinstance(asyncio.get_running_loop(), asyncio.SelectorEventLoop)
-
-
 async def run_investigation(state: ReviewState, settings: Settings) -> InvestigationReport:
     """Run the bounded agent loop and return a report. Never raises into the graph."""
     with tracer().start_as_current_span(
@@ -309,7 +295,7 @@ async def _run_investigation(
     # The sandbox root is injected by the adapter (a fixture's `repo/` snapshot or a live PR's
     # clone), never derived from `pr_id`. The `resolve()` + `is_relative_to()` check below is
     # unchanged in mechanism — only where the root comes from moved.
-    root = repo_snapshot_dir(state.pr_id).resolve()
+    root = Path(state.workspace_path or repo_snapshot_dir(state.pr_id)).resolve()
     tracker = _Tracker(
         max_tool_calls=settings.gate_investigator_max_tool_calls,
         max_file_chars=settings.gate_investigator_max_file_chars,
@@ -319,13 +305,11 @@ async def _run_investigation(
         return InvestigationReport(
             summary=f"investigation inconclusive: no repo snapshot for {state.pr_id}"
         )
-    if not _loop_can_spawn_subprocess():
+    if not loop_supports_subprocess():
         return InvestigationReport(
             summary=(
-                "investigation inconclusive: this event loop cannot spawn a subprocess, so the "
-                "Claude Code CLI the Agent SDK drives cannot start. On Windows, `uvicorn "
-                "--reload` selects a SelectorEventLoop, which has no subprocess support. Restart "
-                "the server without `--reload`."
+                "investigation inconclusive: the Claude Code CLI the Agent SDK drives cannot "
+                f"start — {UNSUPPORTED_LOOP_REASON}"
             )
         )
 

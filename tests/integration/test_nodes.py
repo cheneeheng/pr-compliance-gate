@@ -33,10 +33,11 @@ from gate.graph.state import (
 )
 
 
-async def test_intake_loads_the_diff_and_changed_files() -> None:
-    update = await intake(ReviewState(pr_id="002_new_dependency"))
-    assert "diff --git" in update["diff"]
-    assert "pyproject.toml" in update["files_changed"]
+async def test_intake_is_a_pass_through_over_what_the_adapter_already_loaded() -> None:
+    """The adapter's `load` runs in the background task before `ainvoke`, so intake fetches
+    nothing — it records what arrived and anchors the short-circuit edge."""
+    state = ReviewState(pr_id="002_new_dependency", diff="diff --git a/x b/x", files_changed=["x"])
+    assert await intake(state) == {}
 
 
 async def test_retrieve_policy_delegates_to_retrieval(monkeypatch: pytest.MonkeyPatch) -> None:
