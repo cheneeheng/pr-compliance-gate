@@ -1,0 +1,52 @@
+# Dev-time observability sidecar, not application deployment.
+#
+# The gate itself still runs with `uv run uvicorn gate.api.app:app`; this file starts a trace
+# backend the developer already has locally. The app must also run with all of this down —
+# `GATE_OTEL_ENABLED=false` installs a no-op provider, because a portfolio reviewer cloning the
+# repo should not need Docker to see the gate work.
+#
+# Image tags are pinned rather than tracking `latest`: an observability backend that changes
+# under you makes a demo non-reproducible. Verify the OTLP ingestion path against the Langfuse
+# docs for the tag you pin — it has moved across major versions.
+
+services:
+  langfuse:
+    image: langfuse/langfuse:3.145.0
+    depends_on:
+      - postgres
+      - clickhouse
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse@postgres:5432/langfuse
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: langfuse
+      CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+      # Local-only credentials. Rotate before exposing this beyond localhost.
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: local-dev-secret-change-me
+      SALT: local-dev-salt-change-me
+      ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000
+      TELEMETRY_ENABLED: "false"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse-postgres:/var/lib/postgresql/data
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    environment:
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: langfuse
+    volumes:
+      - langfuse-clickhouse:/var/lib/clickhouse
+
+volumes:
+  langfuse-postgres:
+  langfuse-clickhouse:

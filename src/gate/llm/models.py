@@ -11,10 +11,13 @@ from __future__ import annotations
 from typing import Literal
 
 from langchain_anthropic import ChatAnthropic
+from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.messages import HumanMessage, SystemMessage
+from opentelemetry.trace import Span
 from pydantic import BaseModel
 
 from gate.config import ModelEffort, Settings, get_settings
+from gate.telemetry.tracing import tracer
 
 # Static per-model price table, USD per 1M tokens (input, output). An ESTIMATE for the demo's
 # cost display — not billing truth. Keyed by the env-configured model id; unknown ids fall back
@@ -100,8 +103,59 @@ async def structured_call[T: BaseModel](
         "json_schema" if model.reasoning_effort else "function_calling"
     )
     structured = model.with_structured_output(schema, method=method)
-    result = await structured.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
+    usage = UsageMetadataCallbackHandler()
+    with tracer().start_as_current_span(
+        f"gate.llm.{schema.__name__}",
+        attributes={
+            "gen_ai.system": "anthropic",
+            "gen_ai.request.model": model.model,
+            "gen_ai.operation.name": "chat",
+            # Langfuse renders these as the prompt/completion pair rather than a bare timing bar.
+            "input.value": f"{system}\n\n{user}",
+            # This pairing is not optional bookkeeping: an effort setting turns on adaptive
+            # thinking, the API then refuses to force a tool call, and `function_calling` loses
+            # its guarantee. That is the exact combination that silently broke the specialists in
+            # v1 — recorded here, the next occurrence is a filter query, not a debugging session.
+            "gate.llm.effort": model.reasoning_effort or "",
+            "gate.llm.structured_output_method": method,
+        },
+    ) as span:
+        result = await structured.ainvoke(
+            [SystemMessage(content=system), HumanMessage(content=user)],
+            config={"callbacks": [usage]},
+        )
+        _record_usage(span, model.model, usage)
+        span.set_attribute("output.value", str(result))
     return result  # type: ignore[return-value]  # with_structured_output returns schema instance
+
+
+def _record_usage(span: Span, model_id: str, handler: UsageMetadataCallbackHandler) -> None:
+    """Copy token counts off the callback handler onto the LLM span.
+
+    ``with_structured_output`` returns the parsed schema instance, not the raw ``AIMessage``, so
+    usage is collected through a callback rather than read off the result — the alternative
+    (``include_raw=True``) would change the return shape and move schema-validation failures from
+    an exception into a field nobody checks.
+
+    Thinking tokens get their own attribute rather than being folded into
+    ``gen_ai.usage.output_tokens``, which stays exactly as the API reports it: an effort setting
+    makes thinking a real cost line, and burying it inside a conventional attribute would make
+    the two unreconcilable against a bill.
+    """
+    metadata = handler.usage_metadata.get(model_id)
+    if metadata is None:
+        return
+    output_details = metadata.get("output_token_details") or {}
+    span.set_attributes(
+        {
+            "gen_ai.usage.input_tokens": metadata.get("input_tokens", 0),
+            "gen_ai.usage.output_tokens": metadata.get("output_tokens", 0),
+            "gate.llm.thinking_tokens": output_details.get("reasoning", 0),
+            "gate.llm.cost_estimate_usd": estimate_cost(
+                model_id, metadata.get("input_tokens", 0), metadata.get("output_tokens", 0)
+            ),
+        }
+    )
 
 
 def estimate_cost(model_id: str, input_tokens: int, output_tokens: int) -> float:

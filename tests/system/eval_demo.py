@@ -1,4 +1,4 @@
-"""Behavioral eval: the full three-fixture demo arc, driven through the API (ITER_04 §06).
+"""Behavioral eval: the three-fixture demo arc plus its trace assertion (ITER_02_v2 §06).
 
 Marked ``llm`` — spins the real graph, hits the real Anthropic API, and needs a policy corpus
 that passes ``validate_policy_index``. Asserts each fixture's terminal ``verdict.outcome`` matches
@@ -80,3 +80,31 @@ def test_003_request_info_then_approve() -> None:
         _decide(client, tid, "approve")
         state = _wait(client, tid, {"done"})
         assert state["verdict"]["outcome"] == "approved"
+
+
+def test_a_full_run_is_traced_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cheap, and it stops instrumentation from silently rotting as later iterations add nodes.
+
+    The provider is installed in-process and force-flushed before asserting: a
+    ``BatchSpanProcessor`` buffers, so reading span content without a flush is a race.
+    """
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    from gate.telemetry import tracing as tracing_mod
+
+    memory = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(memory))
+    monkeypatch.setattr(tracing_mod, "_provider", provider)
+
+    with TestClient(create_app()) as client:
+        tid = _start(client, "001_docs_typo")
+        _wait(client, tid, {"done"})
+    provider.force_flush()
+
+    names = {span.name for span in memory.get_finished_spans()}
+    assert {"gate.node.intake", "gate.node.classify", "gate.node.verdict"} <= names
+    run = next(s for s in memory.get_finished_spans() if s.name == "gate.review.run")
+    assert run.attributes["gate.route.taken"] or run.attributes["gate.risk.level"]

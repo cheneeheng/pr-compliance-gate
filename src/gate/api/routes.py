@@ -5,6 +5,7 @@ shape responses. The graph run itself executes as a background task so the UI ca
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import uuid4
 
@@ -13,11 +14,18 @@ from fastapi.responses import FileResponse
 from langgraph.types import Command
 from pydantic import BaseModel, ConfigDict
 
+from gate.config import get_settings
 from gate.errors import NoPendingDecisionError, ReviewNotFoundError
 from gate.graph.state import DecisionAction, initial_state
 from gate.intake.loader import list_prs, load_pr
 from gate.logging import get_logger
 from gate.paths import STATIC_DIR
+from gate.telemetry.tracing import (
+    current_request_context,
+    review_run_span,
+    set_run_outcome_attributes,
+    trace_id_of,
+)
 
 log = get_logger(__name__)
 router = APIRouter()
@@ -50,10 +58,27 @@ def _derive_status(values: dict[str, Any], snapshot: Any) -> str:
     return "running"
 
 
-def _spawn(request: Request, coro: Any, *, pr_id: str) -> None:
+def _spawn(
+    request: Request,
+    invoke: Callable[[str | None], Awaitable[Any]],
+    *,
+    pr_id: str,
+    thread_id: str,
+) -> None:
+    """Run a graph invocation as a tracked background task under its own root run span.
+
+    The run span is opened *here*, inside the task, not in the handler: the handler returns as
+    soon as this is spawned, so parenting the run under the request span would attach a
+    multi-minute run to a span that ended in milliseconds. The request span's context is captured
+    while it is still current and carried in as a span *link* instead.
+    """
+    link_to = current_request_context()
+
     async def _runner() -> None:
         try:
-            await coro
+            with review_run_span(pr_id, thread_id, link_to) as span:
+                values = await invoke(trace_id_of(span))
+                set_run_outcome_attributes(span, values or {})
         except Exception as exc:  # noqa: BLE001 — background run: log, never crash the app
             log.info("graph_run_error", pr_id=pr_id, error=str(exc))
 
@@ -78,11 +103,13 @@ async def start_review(body: StartReview, request: Request) -> dict[str, str]:
     thread_id = str(uuid4())
     request.app.state.reviews[thread_id] = body.pr_id
     graph = request.app.state.graph
-    _spawn(
-        request,
-        graph.ainvoke(initial_state(body.pr_id, thread_id), _config(thread_id)),
-        pr_id=body.pr_id,
-    )
+
+    async def _invoke(trace_id: str | None) -> Any:
+        state = initial_state(body.pr_id, thread_id)
+        state.trace_id = trace_id  # seeded before ainvoke, so it is in the first checkpoint
+        return await graph.ainvoke(state, _config(thread_id))
+
+    _spawn(request, _invoke, pr_id=body.pr_id, thread_id=thread_id)
     return {"thread_id": thread_id}
 
 
@@ -118,8 +145,22 @@ async def get_review(thread_id: str, request: Request) -> dict[str, Any]:
         pr_id = request.app.state.reviews.get(thread_id)
         if pr_id is None:
             raise ReviewNotFoundError(f"no review for thread {thread_id}")
-        return {"status": "running", "thread_id": thread_id, "pr_id": pr_id}
-    return {"status": _derive_status(values, snapshot), **values}
+        return {"status": "running", "thread_id": thread_id, "pr_id": pr_id, **_ui_config()}
+    return {"status": _derive_status(values, snapshot), **values, **_ui_config()}
+
+
+def _ui_config() -> dict[str, Any]:
+    """Server config the detail view needs but that is not review state.
+
+    `trace_id` rides along inside the snapshot; the Langfuse base URL does not, so this response
+    is `{...ReviewState, langfuse_ui_base}` rather than a bare snapshot. It is the first place
+    the detail response stops being exactly `ReviewState`, which is worth stating rather than
+    leaving a reader to discover it in the JS. Empty when tracing is off, so the UI omits the
+    link entirely rather than rendering a permanently dead button.
+    """
+    settings = get_settings()
+    base = settings.gate_langfuse_ui_base if settings.gate_otel_enabled else ""
+    return {"langfuse_ui_base": base}
 
 
 @router.get("/api/reviews/{thread_id}/pending")
@@ -142,12 +183,15 @@ async def submit_decision(thread_id: str, body: DecisionBody, request: Request) 
     if not _pending_interrupts(snapshot):
         raise NoPendingDecisionError("no pending decision")  # 409; double-submits land here too
     pr_id = request.app.state.reviews.get(thread_id, snapshot.values.get("pr_id", ""))
-    _spawn(
-        request,
-        graph.ainvoke(
+
+    async def _invoke(_trace_id: str | None) -> Any:
+        # The resumed leg gets its own root run span, but `trace_id` in state is left at the
+        # first run's value: `Command(resume=...)` carries no state to seed, and the UI's
+        # deep-link should keep pointing at the trace where the review started.
+        return await graph.ainvoke(
             Command(resume={"action": body.action.value, "note": body.note}),
             _config(thread_id),
-        ),
-        pr_id=pr_id,
-    )
+        )
+
+    _spawn(request, _invoke, pr_id=pr_id, thread_id=thread_id)
     return {"status": "resumed"}

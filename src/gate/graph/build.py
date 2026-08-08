@@ -23,6 +23,7 @@ from gate.config import get_settings
 if TYPE_CHECKING:
     from langgraph.checkpoint.base import BaseCheckpointSaver
     from langgraph.graph.state import CompiledStateGraph
+from gate.graph.nodes import traced_node
 from gate.graph.nodes.classify import classify
 from gate.graph.nodes.human_gate import human_gate
 from gate.graph.nodes.intake import intake
@@ -63,16 +64,20 @@ def build_graph_builder() -> StateGraph[ReviewState]:
     """Construct the uncompiled graph topology (checkpointer added at compile time)."""
     builder: StateGraph[ReviewState] = StateGraph(ReviewState)
 
-    builder.add_node("intake", intake)
-    builder.add_node("classify", classify)
-    builder.add_node("retrieve_policy", retrieve_policy)
-    builder.add_node("risk_score", risk_score)
-    builder.add_node("security_specialist", security_specialist)
-    builder.add_node("license_specialist", license_specialist)
-    builder.add_node("reconcile", reconcile)
-    builder.add_node("investigate", investigate)
-    builder.add_node("human_gate", human_gate)
-    builder.add_node("verdict", verdict)
+    # traced_node is applied here, uniformly, so no node can be silently untraced.
+    for name, fn in (
+        ("intake", intake),
+        ("classify", classify),
+        ("retrieve_policy", retrieve_policy),
+        ("risk_score", risk_score),
+        ("security_specialist", security_specialist),
+        ("license_specialist", license_specialist),
+        ("reconcile", reconcile),
+        ("investigate", investigate),
+        ("human_gate", human_gate),
+        ("verdict", verdict),
+    ):
+        builder.add_node(name, traced_node(fn))
 
     builder.add_edge(START, "intake")
     builder.add_edge("intake", "classify")

@@ -46,6 +46,14 @@ dependencies = [
     "pyyaml>=6.0",
     # Investigator harness (SDK is young; pin the minor at install time if its surface moves)
     "claude-agent-sdk>=0.1,<0.2",
+    # Tracing. OTLP over HTTP, not gRPC: one fewer transport dependency, and Langfuse's
+    # ingestion is HTTP. The Langfuse SDK is deliberately NOT a dependency — Langfuse is
+    # addressed purely as an OTLP endpoint, which is what keeps the instrumentation
+    # vendor-neutral (point the same exporter at Jaeger or Tempo and nothing else changes).
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-http>=1.27",
+    "opentelemetry-instrumentation-fastapi>=0.48b0",
     # API
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",

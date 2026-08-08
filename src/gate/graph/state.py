@@ -183,6 +183,12 @@ class ReviewState(BaseModel):
 
     pr_id: str
     thread_id: str = ""
+    # The run span's trace id, seeded by the background task *before* `ainvoke` so it is already
+    # present in the very first checkpoint — including for a review that never reaches a node.
+    # Seeded rather than written by the first node: `traced_node` is applied uniformly and gains
+    # nothing from one node carrying a special responsibility. It is a `str`, so the checkpoint
+    # allowlist is untouched and GATE_STATE_VERSION stays at 2.
+    trace_id: str | None = None
     diff: str = ""
     files_changed: list[str] = Field(default_factory=list)
     policy_context: list[PolicyChunk] = Field(default_factory=list)

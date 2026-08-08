@@ -52,6 +52,19 @@ class Settings(BaseSettings):
     gate_specialist_timeout_s: float = 60.0
     gate_max_diff_chars: int = 20_000
 
+    # Tracing. `Settings` has no `env_prefix` — each field reads the env var matching its own
+    # name — so the two `otel_*` fields read `OTEL_EXPORTER_OTLP_ENDPOINT` and
+    # `OTEL_EXPORTER_OTLP_HEADERS` unprefixed, which is the OTel SDK's own convention. Anyone who
+    # has configured OTel before sets those without reading this repo's docs; getting it wrong is
+    # silent (the exporter falls back to localhost:4318, usually right in local dev and wrong
+    # everywhere else), so it is worth keeping them on the standard names.
+    gate_otel_enabled: bool = True
+    gate_otel_service_name: str = "pr-compliance-gate"
+    otel_exporter_otlp_endpoint: str = "http://localhost:3000/api/public/otel"
+    otel_exporter_otlp_headers: str = ""
+    # Used only to build the UI's trace deep-link; server config, never review state.
+    gate_langfuse_ui_base: str = "http://localhost:3000"
+
     # Investigator sub-agent budgets
     gate_investigator_max_turns: int = 8
     gate_investigator_max_tool_calls: int = 15

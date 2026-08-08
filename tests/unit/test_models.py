@@ -76,8 +76,9 @@ class _Structured:
     def __init__(self) -> None:
         self.messages: list[Any] = []
 
-    async def ainvoke(self, messages: list[Any]) -> Classification:
+    async def ainvoke(self, messages: list[Any], config: Any = None) -> Classification:
         self.messages = messages
+        self.config = config
         return Classification(change_type="docs", summary="s")
 
 
@@ -87,6 +88,7 @@ class _Model:
         self.schema: Any = None
         self.method: Any = None
         self.reasoning_effort = reasoning_effort
+        self.model = "claude-haiku-4-5"  # read for the LLM span's gen_ai.request.model
 
     def with_structured_output(self, schema: Any, method: str) -> _Structured:
         self.schema = schema

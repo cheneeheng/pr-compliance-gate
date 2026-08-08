@@ -6,6 +6,7 @@ added. No auth: single-user local demo (deferred, see the plan's out-of-scope li
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections import OrderedDict
 from collections.abc import AsyncIterator
@@ -27,6 +28,7 @@ from gate.graph.build import compile_graph
 from gate.graph.checkpoint import check_state_version, use_state_allowlist
 from gate.intake.retrieval import validate_policy_index
 from gate.logging import configure_logging, get_logger, set_correlation_id
+from gate.telemetry.tracing import init_tracing, shutdown_tracing
 
 log = get_logger(__name__)
 
@@ -50,11 +52,27 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # disk; this ordered map just backs the list view (see DECISION_LOG entry 5).
     app.state.reviews = OrderedDict()
     app.state.bg_tasks = set()
-    async with AsyncSqliteSaver.from_conn_string(str(settings.gate_db_path)) as saver:
-        app.state.graph = compile_graph(use_state_allowlist(saver))
-        log.info("app_started", db=str(settings.gate_db_path))
-        yield
+    init_tracing(app, settings)
+    try:
+        async with AsyncSqliteSaver.from_conn_string(str(settings.gate_db_path)) as saver:
+            app.state.graph = compile_graph(use_state_allowlist(saver))
+            log.info("app_started", db=str(settings.gate_db_path))
+            yield
+    finally:
+        # Ordering is load-bearing: drain the tracked runs *first*. Reversed, a run still in
+        # flight writes to a shut-down provider and its tail spans vanish — the same symptom as
+        # an unflushed BatchSpanProcessor, from a different cause.
+        await _drain(app.state.bg_tasks)
+        shutdown_tracing()
     log.info("app_stopped")
+
+
+async def _drain(tasks: set[asyncio.Task[None]]) -> None:
+    """Cancel and await every tracked graph run before the tracer provider goes away."""
+    for task in list(tasks):
+        task.cancel()
+    if tasks:
+        await asyncio.gather(*list(tasks), return_exceptions=True)
 
 
 def create_app() -> FastAPI:
