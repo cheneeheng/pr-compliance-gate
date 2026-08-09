@@ -15,6 +15,14 @@ A review reaches you for one of these reasons; the panels tell you which:
 | **Escalation** reason `timeout` | A specialist did not answer in time; nothing was concluded. |
 | **Escalation** reason `max_cycles` | Open questions remain and the investigation budget is spent. |
 | **Escalation** reason `disagreement` | The specialists rated the same policy differently. |
+| **Escalation** reason `pr_too_large` | The pull request changes more files than the configured cap. Nothing was reviewed. |
+| **Escalation** reason `source_unavailable` | The pull request could not be fetched or cloned. Nothing was reviewed. |
+
+The last two stop the review **before** any model runs, so **Findings** and **Investigation** are
+empty and there is nothing to weigh. **Request more info** does not help — there is no diff and no
+repository snapshot for an investigation to read. Fix the cause and start a new review instead;
+your operator has the diagnosis in
+[`../operations/OP-05-incident-runbook.md`](../operations/OP-05-incident-runbook.md).
 
 ## Choose an action
 

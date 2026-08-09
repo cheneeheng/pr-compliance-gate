@@ -1,7 +1,12 @@
 # OP-04 — Monitoring
 
-There is no metrics endpoint, dashboard, or alerting in this build. Monitoring means reading
-structured logs on stdout and the review state exposed by the API.
+There is no metrics endpoint and no alerting in this build. Monitoring means three things: reading
+structured logs on stdout, inspecting review state through the API, and — when tracing is enabled
+— reading traces in Langfuse.
+
+Traces are where per-step timing and per-call cost live. Logs are where failures announce
+themselves. Use logs to find that something went wrong; use traces to find where the time and the
+money went.
 
 ## Where the logs go
 
@@ -38,6 +43,71 @@ Background graph runs are spawned outside the request that created them, so thei
 the `pr_id` rather than the originating request's correlation id. **Filter pipeline problems by
 `pr_id`.**
 
+When tracing is enabled, every log line also carries `trace_id` and `span_id`:
+
+```
+event='verdict' pr_id='003_auth_change' correlation_id='9f2c…' trace_id='4bf92f…' span_id='00f067…'
+```
+
+That is the join between a log line and a Langfuse trace. Copy the `trace_id` out of a log line to
+open the same review in the trace UI, or copy it out of the UI's **View trace** link to grep the
+log.
+
+## Traces
+
+Skip this section if `GATE_OTEL_ENABLED=false`. Setup is in
+[`OP-01-install.md`](OP-01-install.md); the settings are in
+[`OP-02-configure.md`](OP-02-configure.md).
+
+One review produces one trace named `gate.review.run`, containing one span per pipeline step:
+
+```
+gate.review.run                       ← the whole review; its duration IS the review duration
+  ├─ gate.node.intake
+  ├─ gate.node.classify
+  │    └─ gate.llm.Classification     ← one model call, with tokens and cost
+  ├─ gate.node.risk_score
+  ├─ gate.node.security_specialist
+  ├─ gate.node.license_specialist
+  ├─ gate.node.reconcile
+  ├─ gate.node.investigate
+  │    └─ gate.investigator.run
+  │         └─ gate.investigator.tool.run_semgrep
+  └─ gate.node.verdict
+```
+
+The `POST /api/reviews` request is a **separate** trace linked to this one, because the review
+outlives the HTTP call that started it. Do not look for the review under the request.
+
+### Attributes worth filtering on
+
+| Attribute | On | Use |
+|---|---|---|
+| `gate.pr_id` | every span | Find one PR's runs. |
+| `gate.thread_id` | every span | Find **both** legs of a review that paused at the human gate. |
+| `gate.risk.level` | the run span | Confirm the risk gate: filter `low`, expect no specialist model calls. |
+| `gate.route.taken` | the run span | Which way `reconcile` sent the review. |
+| `gate.loop_count.final` | the run span | Investigation rounds used, against `GATE_MAX_CYCLES`. |
+| `gate.escalation.reason` | the run span | Why a review needed a human. |
+| `gate.cost.investigator_usd` | the run span | Investigation spend. |
+| `gate.llm.cost_estimate_usd` | each `gate.llm.*` span | Per-call spend, every tier. |
+| `gen_ai.usage.input_tokens` / `output_tokens` | each `gate.llm.*` span | Token counts as the API reported them. |
+| `gate.llm.thinking_tokens` | each `gate.llm.*` span | Thinking tokens, kept separate so they reconcile against a bill. |
+| `gate.node.interrupted` | `gate.node.human_gate` | The review paused for a human. Not an error. |
+
+**Verify the cost gate is working:** filter traces on `gate.risk.level=low` and confirm none
+contains a `gate.llm.*` span naming the specialist model. That is the design claim, checked rather
+than assumed.
+
+### Trace-level symptoms
+
+| What you see | What it means |
+|---|---|
+| A trace that stops mid-graph | The run was killed, or the server was shut down during it. Not a routing bug. |
+| Two traces for one review | Expected when the review paused at the human gate. Search `gate.thread_id` to get both. |
+| Hundreds of one-span traces | UI polling. Each poll is its own request trace. Noise, not a fault. |
+| Reviews complete but Langfuse is empty | An export problem, not a pipeline problem — see [`OP-05-incident-runbook.md`](OP-05-incident-runbook.md). |
+
 ## Events worth watching
 
 | Event | Level | Meaning | Healthy? |
@@ -55,15 +125,19 @@ the `pr_id` rather than the originating request's correlation id. **Filter pipel
 
 ## Cost signals
 
-There is no cost aggregation. Two places show spend:
+There is no cost aggregation and no budget alerting. Three places show spend, in increasing order
+of completeness:
 
 - **`investigation_done` log lines** — `cost_usd` per investigation, measured by the harness (not
-  self-reported by the model).
-- **The Investigation panel** in the UI — the same estimate, plus the tool-call count and the list
-  of files read.
+  self-reported by the model). Available whether or not tracing is on.
+- **The Investigation panel** in the UI — the same estimate, plus the tool-call count, the semgrep
+  run count, and the list of files read.
+- **Traces** — `gate.llm.cost_estimate_usd` on **every** model call, classifier and specialists
+  included, plus `gate.cost.investigator_usd` on the run span. This is the only place
+  classifier and specialist spend is visible.
 
-Specialist and classifier spend is not estimated anywhere. Reconcile it against your Anthropic
-console.
+All figures are estimates from a static price table against reported token counts. Reconcile them
+against your Anthropic console before trusting them for anything that matters.
 
 The cheapest health signal that the cost gates are working: the fraction of reviews ending
 `auto_approved` without any Findings panel content. If that fraction collapses, someone lowered

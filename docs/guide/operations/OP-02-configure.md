@@ -118,11 +118,19 @@ returns an inconclusive report rather than raising an error.
 | Var | Default | Effect |
 |---|---|---|
 | `GATE_INVESTIGATOR_MAX_TURNS` | `8` | Maximum model turns in the tool loop. |
-| `GATE_INVESTIGATOR_MAX_TOOL_CALLS` | `15` | Maximum read-only tool calls (`read_file`, `grep_repo`, `list_dir`) across the whole investigation. |
+| `GATE_INVESTIGATOR_MAX_TOOL_CALLS` | `15` | Maximum read-only tool calls across the whole investigation, counting all four tools (`read_file`, `grep_repo`, `list_dir`, `run_semgrep`). |
 | `GATE_INVESTIGATOR_MAX_FILE_CHARS` | `15000` | Maximum characters returned from any single file read. |
 
-The investigator can only read inside `data/sample_prs/<pr_id>/repo/`. Path traversal (`..`) and
-absolute paths are rejected by the sandbox; it has no write, network, or shell access.
+`GATE_SEMGREP_MAX_RUNS` (see [Static analysis](#static-analysis)) is a *second, narrower* ceiling
+on top of this one: a scan must satisfy both. A semgrep run is never exempt from the tool-call
+budget just because it is deterministic, and a run that *fails* still spends from both budgets —
+otherwise a broken scanner could be retried for free until the turn budget died.
+
+The investigator can only read inside the review's workspace — a fixture's
+`data/sample_prs/<pr_id>/repo/` snapshot, or a live pull request's clone under
+`GATE_WORKSPACE_DIR`. The root is injected by the source adapter, never derived from the PR id.
+Path traversal (`..`) and absolute paths are rejected by the sandbox; it has no write, network, or
+shell access.
 
 ## Applying a change
 

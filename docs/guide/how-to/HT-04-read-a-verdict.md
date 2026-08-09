@@ -14,13 +14,13 @@
 There is no automatic rejection. Every negative outcome is a human decision — the machine can
 only approve cheaply or escalate.
 
-## Tracing why
+## Work out why
 
 Read the panels bottom-up from the verdict:
 
 1. **Verdict → rationale.** The stated reason for the outcome.
 2. **Escalation.** If populated, this is why a human was involved at all — `timeout`,
-   `max_cycles`, or `disagreement`.
+   `max_cycles`, `disagreement`, `pr_too_large`, or `source_unavailable`.
 3. **Findings.** The policy citations. A `block` severity here is the usual reason a review left
    the automatic path.
 4. **Investigation.** What the sub-agent actually read, and what it cost.
@@ -37,3 +37,10 @@ Read the panels bottom-up from the verdict:
   the human decided without their input. Worth re-running the review if the outcome matters.
 - **An Investigation summary starting `investigation inconclusive:`** — the sub-agent ran out of
   budget or errored, and the human decided without its answer.
+- **`approved` or `rejected` with an escalation of `pr_too_large` or `source_unavailable`** — the
+  pull request was never reviewed at all. Every panel above the verdict is empty, and the human
+  decided with no machine input whatsoever.
+
+If tracing is enabled, the **View trace** link opens the same sequence with timings and per-call
+costs attached. For a review that paused at the human gate, that link covers the part *before* the
+pause — see [`HT-01-review-a-pull-request.md`](HT-01-review-a-pull-request.md).
