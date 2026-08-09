@@ -127,6 +127,6 @@ def build_graph_builder() -> StateGraph[ReviewState]:
     return builder
 
 
-# Any saver: `.with_allowlist()` returns a BaseCheckpointSaver clone, not the concrete class.
+# Any saver: `use_state_allowlist()` returns a BaseCheckpointSaver clone, not the concrete class.
 def compile_graph(checkpointer: BaseCheckpointSaver[Any]) -> CompiledStateGraph[ReviewState]:
     return build_graph_builder().compile(checkpointer=checkpointer)

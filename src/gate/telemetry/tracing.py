@@ -123,19 +123,24 @@ def trace_id_of(span: Span) -> str | None:
 
 @contextmanager
 def review_run_span(
-    pr_id: str, thread_id: str, link_to: SpanContext | None = None
+    pr_id: str,
+    thread_id: str,
+    link_to: SpanContext | None = None,
+    source: str = "fixture",
 ) -> Iterator[Span]:
     """Open the root span for one graph run and publish its context for the node decorator.
 
     ``context=Context()`` makes this a root even when a request span is ambient — the link, not
     parentage, is what ties the run back to the call that kicked it off.
+
+    ``gate.pr.source`` rides on the root so live and fixture runs are separable with one filter.
     """
     links = [Link(link_to)] if link_to is not None else []
     with tracer().start_as_current_span(
         "gate.review.run",
         context=Context(),
         links=links,
-        attributes={"gate.pr_id": pr_id, "gate.thread_id": thread_id},
+        attributes={"gate.pr_id": pr_id, "gate.thread_id": thread_id, "gate.pr.source": source},
     ) as span:
         _RUN_CONTEXTS[thread_id] = trace.set_span_in_context(span)
         try:

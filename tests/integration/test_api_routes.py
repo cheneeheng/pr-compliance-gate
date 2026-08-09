@@ -153,6 +153,6 @@ async def test_a_failed_background_run_is_logged_not_crashed() -> None:
     async def _boom(_trace_id: str | None) -> None:
         raise RuntimeError("graph exploded")
 
-    _spawn(request, _boom, pr_id="t", thread_id="abc")
+    _spawn(request, _boom, pr_id="t", thread_id="abc", source="fixture")
     while request.app.state.bg_tasks:
         await asyncio.sleep(0)

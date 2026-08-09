@@ -261,7 +261,9 @@ def initial_state(pr_id: str, thread_id: str) -> ReviewState:
 
 # Every domain type that can reach a checkpoint, declared for LangGraph's msgpack allowlist.
 # LangGraph deserializes unregistered types with a warning today and will block them in a future
-# version, so each checkpointer is wrapped in `.with_allowlist(CHECKPOINT_ALLOWLIST)`. Kept
+# version, so each checkpointer is wrapped in `use_state_allowlist(saver)` (graph/checkpoint.py),
+# which *constructs* a serializer with this allowlist — `saver.with_allowlist(...)` merges into the
+# default sentinel `True` and is a silent no-op. Kept
 # explicit rather than derived from `vars()`: an allowlist is a security boundary and is worth
 # reading at a glance. `test_state.py` fails if this drifts from the module.
 CHECKPOINT_ALLOWLIST: tuple[tuple[str, str], ...] = tuple(

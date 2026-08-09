@@ -82,6 +82,7 @@ def _spawn(
     *,
     pr_id: str,
     thread_id: str,
+    source: str,
 ) -> None:
     """Run a graph invocation as a tracked background task under its own root run span.
 
@@ -94,7 +95,7 @@ def _spawn(
 
     async def _runner() -> None:
         try:
-            with review_run_span(pr_id, thread_id, link_to) as span:
+            with review_run_span(pr_id, thread_id, link_to, source) as span:
                 values = await invoke(trace_id_of(span))
                 set_run_outcome_attributes(span, values or {})
         except Exception as exc:  # noqa: BLE001 — background run: log, never crash the app
@@ -148,7 +149,7 @@ async def start_review(body: StartReview, request: Request) -> dict[str, str]:
         state.escalation = payload.escalation
         return await graph.ainvoke(state, _config(thread_id))
 
-    _spawn(request, _invoke, pr_id=pr_id, thread_id=thread_id)
+    _spawn(request, _invoke, pr_id=pr_id, thread_id=thread_id, source=source.source_name)
     return {"thread_id": thread_id}
 
 
@@ -231,6 +232,7 @@ async def submit_decision(thread_id: str, body: DecisionBody, request: Request) 
         raise NoPendingDecisionError("no pending decision")  # 409; double-submits land here too
     registration = request.app.state.reviews.get(thread_id)
     pr_id = registration.pr_id if registration else snapshot.values.get("pr_id", "")
+    source = registration.source if registration else snapshot.values.get("source", "fixture")
 
     async def _invoke(_trace_id: str | None) -> Any:
         # The resumed leg gets its own root run span, but `trace_id` in state is left at the
@@ -241,5 +243,5 @@ async def submit_decision(thread_id: str, body: DecisionBody, request: Request) 
             _config(thread_id),
         )
 
-    _spawn(request, _invoke, pr_id=pr_id, thread_id=thread_id)
+    _spawn(request, _invoke, pr_id=pr_id, thread_id=thread_id, source=source)
     return {"status": "resumed"}

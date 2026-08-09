@@ -527,3 +527,36 @@ stubbed subprocess, so no test depends on the extra being installed.
 
 **Outcome:** Rules verified to fire on fixture 003 with the extra installed; the full default suite
 passes with or without it.
+
+### Entry 21
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-09T00:00:00Z
+**Task:** Plan-compliance audit of the v2 family (ITER_01_v2 .. ITER_04_v2); interpret "rule count"
+on the semgrep tool span (ITER_04_v2 §04).
+
+**Context:** Three ambiguities surfaced while closing audit findings.
+
+1. ITER_04_v2 §04 says each semgrep run is "a child span ... carrying `tool.name=run_semgrep`,
+   rule count and duration". "Rule count" could mean the size of the committed ruleset (a
+   constant, useless on a span) or the number of hits the run returned.
+2. ITER_03_v2 §06 says the per-file-aware truncation is what "the classifier and specialists"
+   see. `risk_score` also feeds the diff to a model but is not named.
+3. Restructuring `submit_decision`'s registration lookup from a ternary into an if/else exposed
+   that the *registered* branch of that lookup has never been exercised by a test — the ternary
+   form hid it from coverage.py, which measures no arc for a conditional expression.
+
+**Decision:** (1) Recorded the hit count as `gate.semgrep.rule_hits`; duration comes free from the
+span. (2) Switched only `classify` and the specialists to `truncate_diff_by_file`, leaving
+`risk_score` on the blunt head+tail cut, because the spec named two nodes and minimal-diff bias
+says not to widen it. (3) Kept the ternary form rather than adding an unrequested test, so the
+`fail_under = 100` gate reflects the same coverage posture it did before this audit.
+
+**Impact / Risk:** (2) leaves one inconsistency: a fixture diff over `GATE_MAX_DIFF_CHARS` would
+still be sliced mid-hunk for the risk scorer only. No shipped fixture is near the budget. (3)
+leaves a real test gap standing — a decision submitted for a *registered* thread never runs that
+half of the lookup — and 100% coverage does not currently mean that path is proven.
+
+**Outcome:** `ruff`, `mypy --strict` and the full default suite pass at 100% statement and branch
+coverage.

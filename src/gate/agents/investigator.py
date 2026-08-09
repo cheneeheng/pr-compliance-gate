@@ -100,19 +100,22 @@ def resolve_in_sandbox(root: Path, path_str: str) -> Path | None:
 
 
 @contextmanager
-def tool_span(tracker: _Tracker, name: str, target: str) -> Iterator[None]:
+def tool_span(tracker: _Tracker, name: str, target: str) -> Iterator[trace.Span]:
     """One child span per tool call, carrying the tool name and its sandboxed argument.
 
     Parented explicitly to the investigation span: the SDK runs tool handlers on its own tasks,
     which ambient OTel context does not follow. This is what makes cost gate #2 *demonstrable*
     rather than asserted — the trace shows the harness stopping at its budget.
+
+    Yields the span so a tool can add its own result attributes; duration comes free from the
+    span itself.
     """
     with tracer().start_as_current_span(
         f"gate.investigator.tool.{name}",
         context=tracker.span_context,
         attributes={"tool.name": name, "tool.target": target},
-    ):
-        yield
+    ) as span:
+        yield span
 
 
 def _build_tools(root: Path, tracker: _Tracker, settings: Settings) -> list[SdkMcpTool[object]]:
@@ -192,7 +195,7 @@ def _build_tools(root: Path, tracker: _Tracker, settings: Settings) -> list[SdkM
         {"path": str},
     )
     async def run_semgrep_tool(args: dict[str, object]) -> dict[str, object]:
-        with tool_span(tracker, "run_semgrep", str(args.get("path", "."))):
+        with tool_span(tracker, "run_semgrep", str(args.get("path", "."))) as span:
             if tracker.budget_exhausted():
                 return _tool_text("tool-call budget exhausted; stop and report.", is_error=True)
             # Semgrep is not exempt from the tool-call budget just because it is deterministic.
@@ -210,6 +213,8 @@ def _build_tools(root: Path, tracker: _Tracker, settings: Settings) -> list[SdkM
             # falling back to read_file.
             tracker.semgrep_runs += 1
             findings, reason = await run_semgrep(path, root, settings)
+            # Rule-hit count on the span; the span's own timing supplies the duration.
+            span.set_attribute("gate.semgrep.rule_hits", len(findings))
             if reason is not None:
                 return _tool_text(f"semgrep unavailable: {reason}", is_error=True)
             tracker.static_findings.extend(findings[: tracker.max_semgrep_results])
