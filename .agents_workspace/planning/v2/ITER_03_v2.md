@@ -2,7 +2,7 @@
 artifact: ITER_03_v2
 status: ready
 created: 2026-07-24
-revised: 2026-08-08
+revised: 2026-08-09
 scope: Live pull-request intake via GitHub MCP behind a source adapter, with workspace materialization and a mocked GitHub client test suite
 sections_changed: [02, 03, 04, 05, 06]
 sections_unchanged: [01]
@@ -118,7 +118,8 @@ therefore split at that seam, deliberately:
   the graph run. These are the slow, retryable parts; their failures are escalations, not HTTP errors,
   because a thread already exists to carry them.
 
-The in-memory registry (`intake/store.py`, ITER_05 § 04) records `source` and — for live PRs — `pr_ref` at
+The in-memory registry (`app.state.reviews`, ITER_05 § 04 — *corrected 2026-08-09 from
+`intake/store.py`; see ITER_01_v2 § 04*) records `source` and — for live PRs — `pr_ref` at
 registration time, so `GET /api/reviews` lists a live review with its badge before its first checkpoint
 exists. The v1 first-review race fix (a known thread reads as `running` until its first checkpoint) covers
 the longer live window unchanged; nothing new is needed for it.

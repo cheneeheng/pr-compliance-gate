@@ -2,7 +2,7 @@
 artifact: ITER_01_v2
 status: ready
 created: 2026-07-24
-revised: 2026-08-08
+revised: 2026-08-09
 scope: Replace Chroma/embedding retrieval with deterministic change_type-keyed policy file lookup; document the RAG scaling threshold
 sections_changed: [02, 03, 04, 06]
 sections_unchanged: [01, 05]
@@ -100,8 +100,14 @@ CWD-relative open. It is already inside the `data/` tree that hatchling `force-i
 so no packaging map edit is needed; `GATE_POLICY_INDEX` overrides the resolved default rather than
 replacing the resolution.
 
-**`intake/store.py` is unaffected.** It is the session-scoped thread registry backing `GET /api/reviews`
-(ITER_05 § 04), not the vector store — naming coincidence only. Nothing in it is removed here.
+**`intake/store.py` dies with the store.** *Corrected 2026-08-09. This paragraph originally read
+"`intake/store.py` is unaffected — it is the session-scoped thread registry, not the vector store,
+naming coincidence only." That was wrong about the shipped code, and following it literally would
+have left a module importing `langchain_chroma` after its only dependency was removed. See
+DECISION_LOG entry 17.* `store.py` **is** the Chroma accessor, so it is deleted here alongside
+`ingest.py`. The session-scoped thread registry backing `GET /api/reviews` (ITER_05 § 04) is
+`app.state.reviews`, an `OrderedDict` created in the lifespan; nothing in this iteration touches
+it. ITER_03_v2 § 04 extends *that* with a `Registration` model.
 
 **Checkpoint compatibility — stated, not discovered.** LangGraph serializes `ReviewState` into `checkpoints.db`; removing `PolicyChunk.distance` makes pre-v2 checkpoints undeserializable on resume. There is **no migration** — this is local single-user demo data. Instead: `config.py` gains `GATE_STATE_VERSION` (bumped to `2`), the lifespan logs a fatal-but-clear message if the DB's recorded version differs, and the README instructs deleting `checkpoints.db`. Deliberate choice, documented so a reviewer sees the decision rather than a crash.
 
