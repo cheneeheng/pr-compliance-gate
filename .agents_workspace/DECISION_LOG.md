@@ -560,3 +560,41 @@ half of the lookup — and 100% coverage does not currently mean that path is pr
 
 **Outcome:** `ruff`, `mypy --strict` and the full default suite pass at 100% statement and branch
 coverage.
+
+---
+
+### Entry 22
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-09T00:00:00Z
+**Task:** Second plan-compliance audit of the v2 family, then bring `examples/demo.py` up to v2
+
+**Context:** `src/gate` audited clean against ITER_01_v2..ITER_04_v2. The one real gap was outside
+`src/`: `examples/demo.py` still invoked the graph with a bare `initial_state(pr_id, thread_id)`.
+ITER_03_v2 §04 moved loading *before* `ainvoke` — the `intake` node now fetches nothing — so the
+demo was reviewing an empty diff. `examples/` is excluded from the coverage source, so the default
+suite could not see it. Three sub-choices had no obvious answer.
+
+**Decision:**
+1. *Beat 4 lives in the demo script, skipped without a token.* ITER_04_v2 §04 specifies four
+   beats and the README claims each maps to a section of the demo's output; leaving beat 4
+   UI-only would keep that claim false. It is skipped with a printed reason when
+   `GATE_GITHUB_TOKEN` is unset, so the default run stays offline and deterministic — the same
+   posture `tests/system/eval_demo.py` takes.
+2. *A throwaway `FastAPI()` satisfies `init_tracing`.* The instrumentor needs an ASGI app. The
+   alternative — making `app` optional in `telemetry/tracing.py` — adds a branch to `src` under
+   `fail_under = 100` for a script's convenience. Two lines in the example beat a new untested
+   branch in the library.
+3. *State seeding is duplicated, not extracted.* The seven-line block that copies a `PRPayload`
+   onto `ReviewState` now exists in both `api/routes.py::start_review` and the demo. Extracting a
+   shared helper is the cleaner shape but is a `src` refactor the task did not ask for. The demo
+   comments point at `routes.py` so the drift is at least signposted.
+
+**Impact / Risk:** (3) is the live risk — a future change to the seeded field set must touch two
+places. Small and named. (1) means a first-time reader without a GitHub token sees three beats and
+a skip line, which is the honest picture.
+
+**Outcome:** Demo verified to load a real fixture payload (1484-char diff, two changed files, a
+workspace path) where the previous version passed an empty diff. Not run end to end — that spends
+API credit.

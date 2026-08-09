@@ -159,8 +159,9 @@ it headless (no UI, scripted human decisions, narrated stage-by-stage) with
    preflight resolves it through the GitHub MCP server (a bad URL is a `422` before a review row
    exists), the background task pages the changed-file list, fetches the diff, and shallow-clones
    the repo at `head_sha` into the investigator's sandbox. Then the same pipeline as beats 1–3.
-   **The gate works on real input, not just fixtures** — this is the beat that could not exist in
-   v1.
+   Headless equivalent: `uv run python examples/demo.py live --pr-url <URL>`, which needs
+   `GATE_GITHUB_TOKEN` and is skipped without one. **The gate works on real input, not just
+   fixtures** — this is the beat that could not exist in v1.
 
 ## Configuration
 
