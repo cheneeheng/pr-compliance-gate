@@ -1,8 +1,11 @@
 # v2 Backlog
 
-Deliberately-unfixed items from the plan-compliance audit of 2026-08-09 (ITER_01_v2 ..
-ITER_04_v2). Not a plan artifact — no frontmatter, no `depends_on`, nothing here is a section
-spec. Each entry says what stands, why it was left, and what closing it costs.
+Items from the plan-compliance audit of 2026-08-09 (ITER_01_v2 .. ITER_04_v2). Not a plan artifact
+— no frontmatter, no `depends_on`, nothing here is a section spec. Each open entry says what
+stands, why it was left, and what closing it costs; closed entries keep their record rather than
+being deleted.
+
+Open: **B-01**. Closed: **B-02**.
 
 Decisions behind these entries: `.agents_workspace/DECISION_LOG.md` entry 21.
 
@@ -29,33 +32,24 @@ ahead of it.
 
 ---
 
-## B-02 — The registered branch of `submit_decision`'s lookup is untested
+## B-02 — The registered branch of `submit_decision`'s lookup is untested — **CLOSED 2026-08-09**
 
-**Where:** `src/gate/api/routes.py:233-235`, `tests/integration/test_decision_endpoint.py`
+**Where:** `src/gate/api/routes.py`, `tests/integration/test_decision_endpoint.py`
 
-**What stands:**
+**What stood:** the lookup was a pair of ternaries, and no test submitted a decision for a thread
+still in `app.state.reviews`, so the `registration is not None` half never ran. Coverage did not
+catch it: `coverage.py` records no arc for a conditional expression, so both halves of a ternary
+count as covered the moment the line executes once.
 
-```python
-pr_id = registration.pr_id if registration else snapshot.values.get("pr_id", "")
-source = registration.source if registration else snapshot.values.get("source", "fixture")
-```
+**How it was closed:** the ternaries are an `if/else` again — the form that fails `fail_under = 100`
+loudly when the path goes untested — and
+`test_a_resumed_run_is_traced_under_the_registration_not_the_checkpoint` registers a thread whose
+`pr_id`/`source` differ from the checkpoint's, then asserts the run span carries the
+*registration's* values. Verified by mutation: forcing the fallback branch makes that test fail.
 
-No test submits a decision for a thread that is still in `app.state.reviews`, so the
-`registration is not None` half never runs. Coverage does not catch it: `coverage.py` records no
-arc for a conditional expression, so both halves of a ternary count as covered the moment the line
-executes once.
-
-**Why left:** the audit rewrote this as an `if/else`, which surfaced the gap as a real coverage
-failure — then reverted to the ternary rather than add a test the task did not ask for. The gap is
-pre-existing; the rewrite only made it visible.
-
-**Impact today:** `fail_under = 100` is green, and for this path that green is not evidence. The
-same blind spot applies to every other ternary in `src/gate` — this is the one that was found, not
-necessarily the only one.
-
-**Cost to close:** one test — register a thread, interrupt it, POST a decision, assert the run span
-carries that registration's `pr_id` and `source`. Then restore the `if/else` form, which is the
-version that fails loudly when the path goes untested again.
+**Still worth knowing:** the ternary blind spot is a property of `coverage.py`, not of this line.
+Any other conditional expression in `src/gate` can hide the same gap; this was the one that was
+found, not necessarily the only one.
 
 ---
 

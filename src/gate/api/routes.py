@@ -230,9 +230,17 @@ async def submit_decision(thread_id: str, body: DecisionBody, request: Request) 
         raise ReviewNotFoundError(f"no review for thread {thread_id}")
     if not _pending_interrupts(snapshot):
         raise NoPendingDecisionError("no pending decision")  # 409; double-submits land here too
+    # Spelled as an if/else rather than two ternaries on purpose: `coverage.py` records no arc for
+    # a conditional expression, so both halves of a ternary count as covered the moment the line
+    # runs once. As branches, an untested half fails `fail_under = 100` loudly.
     registration = request.app.state.reviews.get(thread_id)
-    pr_id = registration.pr_id if registration else snapshot.values.get("pr_id", "")
-    source = registration.source if registration else snapshot.values.get("source", "fixture")
+    if registration is not None:
+        pr_id, source = registration.pr_id, registration.source
+    else:
+        # The registry is session-scoped, so a thread checkpointed by an earlier process is not
+        # in it. The checkpoint is what remembers where that review came from.
+        pr_id = snapshot.values.get("pr_id", "")
+        source = snapshot.values.get("source", "fixture")
 
     async def _invoke(_trace_id: str | None) -> Any:
         # The resumed leg gets its own root run span, but `trace_id` in state is left at the
