@@ -170,15 +170,15 @@
     function panel(title, bodyHtml) { return `<div class="panel"><h3>${esc(title)}</h3>${bodyHtml}</div>`; }
     const orDash = (v, fn) => (v == null ? `<span class="muted">—</span>` : fn(v));
 
-    // Omitted entirely when tracing is off, rather than rendered disabled: the disabled
-    // convention is for controls whose backend arrives in a later iteration, and a permanently
-    // dead button is worse than no button.
     function prTitleLink(s) {
       const ref = s.pr_ref;
       if (!ref || !ref.html_url) return "";
       return `<a href="${esc(ref.html_url)}" target="_blank" rel="noopener">${esc(ref.title || ref.html_url)}</a>`;
     }
 
+    // Omitted entirely when tracing is off, rather than rendered disabled: the disabled
+    // convention is for controls whose backend arrives in a later iteration, and a permanently
+    // dead button is worse than no button.
     function traceLink(s) {
       if (!s.trace_id || !s.langfuse_ui_base) return "";
       const href = `${s.langfuse_ui_base.replace(/\/$/, "")}/traces/${encodeURIComponent(s.trace_id)}`;
