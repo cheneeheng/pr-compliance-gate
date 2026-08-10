@@ -664,3 +664,31 @@ so no eval expectation moves.
 
 **Outcome:** `ruff`, `mypy --strict` and the default suite pass — 226 passed, 100% statement and
 branch coverage of `src/gate`.
+
+---
+
+### Entry 25
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-10T00:00:00Z
+**Task:** Fifth plan-compliance audit of the v2 family (ITER_01_v2 .. ITER_04_v2).
+
+**Context:** `src/gate`, `static/index.html`, `data/policies/`, `rules/`, `pyproject.toml`,
+`.env.example` and `.github/workflows/ci.yml` audited clean against every `sections_changed`
+entry (§02 §03 §04 §05 §06) of the four v2 iterations. One documentation gap and two standing
+backlog items needed a call.
+
+**Decision:** Fixed the gap — ITER_04_v2 §04 says the installed-wheel path "lists the required
+variables inline" because a wheel has no `.env.example` to point at; the README named none. It
+now names `ANTHROPIC_API_KEY` and `GATE_GITHUB_TOKEN` and says the rest have defaults. Left B-03
+(no vendored registry rules) and B-04 (no trace screenshots) open on the reasoning already
+recorded in entries 23 and 24 — nothing about either changed, and re-deciding them without new
+information would only churn the backlog.
+
+**Impact / Risk:** Documentation only; no code path moves. B-03 keeps the investigator's
+detection limited to the four hand-written rules, B-04 keeps the "proven, not asserted" claim
+resting on the reader running the demo.
+
+**Outcome:** One README edit. No source, test or config file changed, so the suite was not re-run
+— entry 24's green run still describes the code.

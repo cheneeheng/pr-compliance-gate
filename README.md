@@ -48,9 +48,10 @@ all, and a missing `semgrep` binary degrades to `semgrep unavailable: …` insid
 rather than failing the review — cloning this repo should not require Docker to see the gate work.
 
 `uv build` produces a wheel that installs and runs the same way
-(`python -m uvicorn gate.api.app:app`) with the required variables set in the environment; an
-installed wheel has no `.env.example`, so set them directly. The packaging is exercised, just not
-published.
+(`python -m uvicorn gate.api.app:app`). An installed wheel has no `.env.example` to copy, so set
+the required variables in the environment directly: `ANTHROPIC_API_KEY`, plus `GATE_GITHUB_TOKEN`
+for live PRs. Everything else in the table below has a working default. The packaging is
+exercised, just not published.
 
 Either way, `checkpoints.db` and `data/workspaces/` are written into the current working
 directory (override with `GATE_DB_PATH` / `GATE_WORKSPACE_DIR`). The app refuses to start against
