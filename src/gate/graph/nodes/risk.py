@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from gate.config import Settings, get_settings
 from gate.graph.state import ReviewState, RiskAssessment, RiskLevel
-from gate.llm.models import classifier_model, structured_call, truncate_diff
+from gate.llm.models import classifier_model, structured_call, truncate_diff_by_file
 from gate.llm.prompts import RISK_SYSTEM
 from gate.logging import get_logger
 
@@ -26,7 +26,9 @@ def derive_level(score: int, settings: Settings) -> RiskLevel:
 async def risk_score(state: ReviewState) -> dict[str, object]:
     settings = get_settings()
     policy_summary = "\n".join(f"[{c.policy_id}] {c.text[:300]}" for c in state.policy_context)
-    diff = truncate_diff(state.diff, settings.gate_max_diff_chars)
+    # Per-file-aware like classify and the specialists: the scorer reads whole hunks, and the
+    # files the budget dropped are named in the trailing marker rather than cut mid-hunk.
+    diff = truncate_diff_by_file(state.diff, settings.gate_max_diff_chars)
     classification_json = state.classification.model_dump_json() if state.classification else "{}"
     user = (
         f"Classification:\n{classification_json}\n\n"
