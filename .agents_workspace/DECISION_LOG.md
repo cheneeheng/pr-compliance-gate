@@ -598,3 +598,69 @@ a skip line, which is the honest picture.
 **Outcome:** Demo verified to load a real fixture payload (1484-char diff, two changed files, a
 workspace path) where the previous version passed an empty diff. Not run end to end — that spends
 API credit.
+
+---
+
+### Entry 23
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-10T00:00:00Z
+**Task:** Third plan-compliance audit of the v2 family (ITER_01_v2 .. ITER_04_v2).
+
+**Context:** `src/gate` audited clean again. Two gaps sit outside it, and neither has an
+implementation answer that is obviously right.
+
+1. ITER_04_v2 §04 specifies `rules/` as "a handful of registry rules vendored locally plus two or
+   three hand-written rules". Only the hand-written half shipped.
+2. ITER_04_v2 §04 says each README demo beat "links a trace screenshot". None does.
+
+**Decision:** Left both, recorded as BACKLOG B-03 and B-04 rather than closed silently.
+(1) Vendoring semgrep-registry rules imports LGPL-2.1 content into an Apache-2.0 repo — a licence
+decision for a human, and the same spec paragraph argues *against* the generic lint noise those
+rules are. (2) A screenshot needs a live Langfuse container and a paid end-to-end run; fabricating
+one would misrepresent the artifact. Fixed only the one in-scope defect found: a comment in
+`static/index.html` describing the trace link's omit-when-disabled behaviour (ITER_02_v2 §05) sat
+above `prTitleLink` instead of `traceLink`.
+
+**Impact / Risk:** (1) leaves the investigator's detection limited to four hand-written rules;
+fixture 003 fires two of them, so the demo beat is unaffected. (2) leaves the README's "proven,
+not asserted" claim resting on the reader running the demo.
+
+**Outcome:** `ruff`, `mypy --strict` and the default suite pass — 226 passed, 100% statement and
+branch coverage of `src/gate`.
+
+---
+
+### Entry 24
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-10T00:00:00Z
+**Task:** Fourth plan-compliance audit of the v2 family (ITER_01_v2 .. ITER_04_v2).
+
+**Context:** Two items needed a call rather than an edit.
+
+1. ITER_04_v2 §03/§04 say CI "installs the pinned `semgrep` wherever the interpreter supports
+   it". `.github/workflows/ci.yml` synced only `--extra dev`, so no leg ever installed it. The
+   pin (1.172.0) ships cp312/cp313/cp314 wheels, so both matrix legs support it.
+2. BACKLOG B-01: ITER_03_v2 §06 introduced per-file-aware truncation naming only "the classifier
+   and specialists", so `risk_score` kept the blunt head+tail cut. Two prior audits left it as
+   scope creep against the spec's wording.
+
+**Decision:** (1) Fixed — the sync installs `--extra semgrep` on both legs, with a comment
+recording that a leg whose interpreter the pin has not caught up with would drop the extra and
+still run the full suite. Verified safe: every semgrep path in the default suite is stubbed
+against a fake subprocess, and `test_asyncio_is_used_directly_so_the_stubs_above_are_honest`
+guards that. (2) Closed on the user's instruction — `risk_score` now calls
+`truncate_diff_by_file`, and ITER_03_v2 §06 is amended to name every node that reads the diff,
+so the plan leads the code rather than trailing it. B-03 (registry rules) stays open by the same
+licence reasoning as entry 23; B-04 (trace screenshots) stays open as a human capture task.
+
+**Impact / Risk:** (1) adds a ~70 MB wheel to each CI leg; the uv cache absorbs it after the
+first run, and installing the pin is what proves the pin resolves. (2) changes what the Haiku
+scorer sees only for a diff above `GATE_MAX_DIFF_CHARS`; no shipped fixture is near 20 000 chars,
+so no eval expectation moves.
+
+**Outcome:** `ruff`, `mypy --strict` and the default suite pass — 226 passed, 100% statement and
+branch coverage of `src/gate`.
