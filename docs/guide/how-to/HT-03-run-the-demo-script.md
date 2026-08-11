@@ -1,12 +1,14 @@
 # HT-03 — How to run the demo script
 
-**When:** you want to see all three demo reviews end to end, narrated, without clicking through
-the UI — for a walkthrough, a recording, or a smoke test of a real configuration.
-**Prerequisites:** a shell in the repository root; `uv sync` done; `ANTHROPIC_API_KEY` set in
-`.env`. See [`../operations/OP-01-install.md`](../operations/OP-01-install.md).
-**Time / impact:** a few minutes. **This makes real Anthropic API calls and costs money.** It
-needs no server — it drives the pipeline in-process with an in-memory checkpoint store, and the
-human decisions are scripted.
+[← Guide index](../index.md)
+
+- **When:** you want to see all three demo reviews end to end, narrated, without clicking through
+  the UI — for a walkthrough, a recording, or a smoke test of a real configuration.
+- **Prerequisites:** a shell in the repository root; `uv sync` done; `ANTHROPIC_API_KEY` set in
+  `.env`. See [`../operations/OP-01-install.md`](../operations/OP-01-install.md).
+- **Time / impact:** a few minutes. **This makes real Anthropic API calls and costs money.** It
+  needs no server — it drives the pipeline in-process with an in-memory checkpoint store, and the
+  human decisions are scripted.
 
 ## Steps
 
@@ -45,5 +47,9 @@ covered in [`../operations/OP-05-incident-runbook.md`](../operations/OP-05-incid
 ## Related
 
 The same three fixtures can be driven through the UI instead — start at
-[`HT-01-review-a-pull-request.md`](HT-01-review-a-pull-request.md). The UI path lets you make the human
-decisions yourself; the demo script scripts them.
+[`HT-01-review-a-pull-request.md`](HT-01-review-a-pull-request.md). The UI path lets you make the
+human decisions yourself; the demo script scripts them.
+
+---
+
+[← HT-02 Decide at the human gate](HT-02-decide-at-the-human-gate.md) · [Guide index](../index.md) · [HT-04 Read a verdict →](HT-04-read-a-verdict.md)

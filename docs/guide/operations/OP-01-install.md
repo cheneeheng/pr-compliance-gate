@@ -1,5 +1,7 @@
 # OP-01 — Installation
 
+[← Guide index](../index.md)
+
 Stand up the service on a single machine and verify it is healthy.
 
 ## System overview
@@ -144,19 +146,18 @@ directory), then follow step 4 with every `uv run` prefix dropped.
 4. Confirm end-to-end behaviour with the cheapest fixture: start a review of `001_docs_typo` in
    the UI. It should reach `done` with verdict `auto_approved`.
 
-**Verify:** step 4 produced an `auto_approved` verdict, and `checkpoints.db` now exists in the
-working directory.
-
 5. Optional — confirm live intake: paste a public pull-request URL into the **GitHub PR URL**
    field. A malformed URL must come back as an immediate red banner (a `422`) with *no* review row
    created; a valid one appears in the list with a `github` badge while the clone runs.
+
+**Verify:** step 4 produced an `auto_approved` verdict, and `checkpoints.db` now exists in the
+working directory.
 
 **If it fails:** see [`OP-05-incident-runbook.md`](OP-05-incident-runbook.md). The most common
 first-run failures are an unset `ANTHROPIC_API_KEY`, a model id that does not exist on the
 account, and — for live intake — a `GATE_GITHUB_TOKEN` that is missing or lacks
 `pull_requests:read`.
 
-## Next
+---
 
-- [`OP-02-configure.md`](OP-02-configure.md) — tune the gates and budgets.
-- [`OP-03-routine-operations.md`](OP-03-routine-operations.md) — day-to-day tasks.
+[Guide index](../index.md) · [OP-02 Configuration →](OP-02-configure.md)

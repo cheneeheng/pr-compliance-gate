@@ -1,7 +1,9 @@
 # HT-04 — How to read a verdict
 
-**When:** a review's badge reads `done` and the **Verdict** panel is populated.
-**Prerequisites:** none beyond having the review open.
+[← Guide index](../index.md)
+
+- **When:** a review's badge reads `done` and the **Verdict** panel is populated.
+- **Prerequisites:** none beyond having the review open.
 
 ## The three outcomes
 
@@ -44,3 +46,7 @@ Read the panels bottom-up from the verdict:
 If tracing is enabled, the **View trace** link opens the same sequence with timings and per-call
 costs attached. For a review that paused at the human gate, that link covers the part *before* the
 pause — see [`HT-01-review-a-pull-request.md`](HT-01-review-a-pull-request.md).
+
+---
+
+[← HT-03 Run the demo script](HT-03-run-the-demo-script.md) · [Guide index](../index.md)

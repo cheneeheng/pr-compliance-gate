@@ -1,5 +1,7 @@
 # OP-02 — Configuration
 
+[← Guide index](../index.md)
+
 All configuration is environment-driven, read from `.env` in the working directory or from the
 process environment. Settings are loaded **once per process** and cached — every change requires a
 restart.
@@ -150,3 +152,7 @@ configuration; behaviour is the check.
 
 **If it fails:** confirm you edited the `.env` in the directory the server was started from, and
 that the variable name matches the table exactly.
+
+---
+
+[← OP-01 Installation](OP-01-install.md) · [Guide index](../index.md) · [OP-03 Routine operations →](OP-03-routine-operations.md)

@@ -692,3 +692,36 @@ resting on the reader running the demo.
 
 **Outcome:** One README edit. No source, test or config file changed, so the suite was not re-run
 — entry 24's green run still describes the code.
+
+---
+
+### Entry 26
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-11T00:00:00Z
+**Task:** Bring `docs/guide/` up to the `user-operator-guide` skill v1.1.6.
+
+**Context:** The skill gained a Phase 4 ("Page furniture and markdown that renders") between
+v1.1.4 and v1.1.6. Most of it was a clean fit — breadcrumbs, prev/next footers, bullet-list
+procedure headers, blank-line rules. One new rule conflicts with the repository: "Don't hard-wrap
+paragraphs at a fixed column." Every Markdown file in this repo — `README.md`, `CLAUDE.md`,
+`docs/tracing-design.md`, `docs/semgrep-rules.md`, and all thirteen guide pages — wraps prose at
+100 columns.
+
+**Decision:** Applied every other Phase 4 rule; did not reflow the prose. Two reasons. The wrap
+is a repository-wide convention, and unwrapping only `docs/guide/` would leave the docs tree
+inconsistent with the engineering notes that sit beside it. And a reflow rewrites roughly 1,500
+lines of prose in a diff where no line is unchanged, which destroys the reviewability of the
+navigation changes it would be bundled with. The rule is stylistic: a hard-wrapped paragraph
+renders correctly, it just reads narrow on a phone. The render-breaking rules from the same phase
+(stacked bold labels collapsing into one paragraph, a numbered list restarting at 1) were fixed.
+
+**Impact / Risk:** `docs/guide/` satisfies the v1.1.6 checklist except the no-hard-wrap line.
+Re-running the skill later will flag the same item; this entry is why. If the guide ever moves to
+a docs site with a narrow mobile viewport, reflow the whole `docs/` tree in one dedicated commit
+rather than per-page.
+
+**Outcome:** Thirteen pages carry breadcrumbs, nine carry prev/next footers, `index.md` lists
+every page grouped by subfolder with a "read this when" line. Link and structure checks pass; no
+source, test, or config file was touched.

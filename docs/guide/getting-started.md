@@ -1,5 +1,7 @@
 # Getting started
 
+[← Guide index](index.md)
+
 Goal: complete one review end to end and see a verdict, in about five minutes.
 
 ## Before you begin

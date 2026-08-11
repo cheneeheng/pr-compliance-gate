@@ -1,11 +1,13 @@
 # HT-01 — How to review a pull request
 
-**When:** you want a policy review of a pull request — either a live one on GitHub, or one of the
-bundled sample PRs.
-**Prerequisites:** the server is running and reachable at <http://127.0.0.1:8000>. For a live
-GitHub pull request, your operator must have configured a read-only `GATE_GITHUB_TOKEN`.
-**Time:** seconds for a low-risk change; up to a couple of minutes when specialists and an
-investigation run. A live pull request adds time for the first clone of that repository.
+[← Guide index](../index.md)
+
+- **When:** you want a policy review of a pull request — either a live one on GitHub, or one of
+  the bundled sample PRs.
+- **Prerequisites:** the server is running and reachable at <http://127.0.0.1:8000>. For a live
+  GitHub pull request, your operator must have configured a read-only `GATE_GITHUB_TOKEN`.
+- **Time:** seconds for a low-risk change; up to a couple of minutes when specialists and an
+  investigation run. A live pull request adds time for the first clone of that repository.
 
 Both sources run through the identical pipeline. Everything under **Read the result** applies
 either way.
@@ -152,3 +154,7 @@ Langfuse.
 
 **If it fails:** a review stuck on `running` for minutes is an operator issue — see
 [`../operations/OP-05-incident-runbook.md`](../operations/OP-05-incident-runbook.md).
+
+---
+
+[Guide index](../index.md) · [HT-02 Decide at the human gate →](HT-02-decide-at-the-human-gate.md)

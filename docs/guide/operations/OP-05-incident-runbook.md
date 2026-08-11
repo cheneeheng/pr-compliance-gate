@@ -1,5 +1,7 @@
 # OP-05 — Incident runbook
 
+[← Guide index](../index.md)
+
 One entry per failure mode: detection, diagnosis, remediation, verification.
 
 Design invariant worth remembering under pressure: **failures land on a human, not in a stack
@@ -255,3 +257,7 @@ A review that was paused at the human gate can still be resumed by posting to
 This is a single-user local demo with no on-call rotation, no hosted deployment, and no support
 channel. When the runbook runs out: capture the failing log lines (filtered by `pr_id`) and the
 full state from `/api/reviews/{thread_id}`, then file an issue on the repository.
+
+---
+
+[← OP-04 Monitoring](OP-04-monitoring.md) · [Guide index](../index.md)

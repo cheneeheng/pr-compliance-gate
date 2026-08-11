@@ -1,5 +1,7 @@
 # Reference
 
+[← Guide index](index.md)
+
 ## HTTP API
 
 Base URL: `http://127.0.0.1:8000`. No authentication, no CORS, same-origin UI.

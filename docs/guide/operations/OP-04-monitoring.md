@@ -1,5 +1,7 @@
 # OP-04 — Monitoring
 
+[← Guide index](../index.md)
+
 There is no metrics endpoint and no alerting in this build. Monitoring means three things: reading
 structured logs on stdout, inspecting review state through the API, and — when tracing is enabled
 — reading traces in Langfuse.
@@ -153,3 +155,7 @@ curl -i http://127.0.0.1:8000/api/reviews/<thread_id>/pending   # 204 = nothing 
 
 **Verify healthy:** every review is `done` or `awaiting_human`; nothing has sat on `running`
 for longer than a few minutes.
+
+---
+
+[← OP-03 Routine operations](OP-03-routine-operations.md) · [Guide index](../index.md) · [OP-05 Incident runbook →](OP-05-incident-runbook.md)

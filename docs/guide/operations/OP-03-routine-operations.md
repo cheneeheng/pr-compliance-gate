@@ -1,5 +1,7 @@
 # OP-03 — Routine operations
 
+[← Guide index](../index.md)
+
 Everything here assumes a shell in the repository root and a completed
 [installation](OP-01-install.md).
 
@@ -23,9 +25,9 @@ reached by its thread id at `/api/reviews/{thread_id}`.
 
 ## Edit the policy corpus
 
-**When:** after editing, adding, or deleting any file in `data/policies/`.
-**Impact:** none while the server runs — the change takes effect on restart. There is nothing to
-rebuild: retrieval reads the files directly.
+- **When:** after editing, adding, or deleting any file in `data/policies/`.
+- **Impact:** none while the server runs — the change takes effect on restart. There is nothing to
+  rebuild: retrieval reads the files directly.
 
 1. Edit the policy Markdown. Each policy must be an `##` heading whose first token is the policy
    id, exactly in the form `## SEC-01 — No new network egress without review`. A heading without a
@@ -45,8 +47,8 @@ the process refuses to run on a broken corpus rather than producing reviews that
 
 ## Manage the clone cache
 
-**When:** disk pressure, or after reviewing a very large repository.
-**Impact:** none. `data/workspaces/` holds only derived data, re-cloned on demand.
+- **When:** disk pressure, or after reviewing a very large repository.
+- **Impact:** none. `data/workspaces/` holds only derived data, re-cloned on demand.
 
 Workspaces are named by `head_sha` and evicted least-recently-used against
 `GATE_WORKSPACE_MAX_GB` at startup and after each clone. To reclaim space immediately, stop the
@@ -60,7 +62,7 @@ rm -rf data/workspaces
 
 ## Add a sample pull request
 
-**When:** you want a new scenario to review.
+- **When:** you want a new scenario to review.
 
 1. Create the directory:
 
@@ -145,3 +147,7 @@ having changed under an existing database. There is no migration for local demo 
 
 **Verify:** the server starts, `app_started` is logged, and a fresh review of `001_docs_typo`
 reaches `auto_approved`.
+
+---
+
+[← OP-02 Configuration](OP-02-configure.md) · [Guide index](../index.md) · [OP-04 Monitoring →](OP-04-monitoring.md)

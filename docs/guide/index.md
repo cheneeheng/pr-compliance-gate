@@ -24,36 +24,39 @@ Within a folder, read in `HT-`/`OP-` order; each page assumes only what came bef
 
 ## Contents
 
-### Getting started (reviewer)
+### This page's folder (reviewer)
 
-- [`getting-started.md`](getting-started.md) — from a running server to your first completed
-  review.
+- [Getting started](getting-started.md) — read this when the server is running and you have never
+  used the gate before.
+- [Troubleshooting](troubleshooting.md) — read this when something in the browser looks wrong and
+  you want the symptom-to-fix table.
+- [Reference](reference.md) — read this when you need the HTTP API, an exact enum value, a span
+  name, or the file layout.
 
-### How-to (reviewer)
+### `how-to/` (reviewer)
 
-- [`HT-01`](how-to/HT-01-review-a-pull-request.md) — start a review and read every panel of the
-  result.
-- [`HT-02`](how-to/HT-02-decide-at-the-human-gate.md) — approve, reject, or request more
-  information.
-- [`HT-03`](how-to/HT-03-run-the-demo-script.md) — drive all three demo reviews headlessly, with
-  narration.
-- [`HT-04`](how-to/HT-04-read-a-verdict.md) — what each outcome means and what drove it.
+- [HT-01 — How to review a pull request](how-to/HT-01-review-a-pull-request.md) — read this when
+  you want to start a review and understand every panel of the result.
+- [HT-02 — How to decide at the human gate](how-to/HT-02-decide-at-the-human-gate.md) — read this
+  when a review is waiting on your **Approve**, **Reject**, or **Request more info**.
+- [HT-03 — How to run the demo script](how-to/HT-03-run-the-demo-script.md) — read this when you
+  want all three demo reviews narrated in a terminal instead of clicked through the UI.
+- [HT-04 — How to read a verdict](how-to/HT-04-read-a-verdict.md) — read this when a review has
+  finished and you want to know what drove the outcome.
 
-### Operations (operator)
+### `operations/` (operator)
 
-- [`OP-01`](operations/OP-01-install.md) — dependencies, API key, GitHub token, health check.
-- [`OP-02`](operations/OP-02-configure.md) — every setting: purpose, default, effect.
-- [`OP-03`](operations/OP-03-routine-operations.md) — start/stop, edit the policy corpus, add a
-  sample PR, manage the clone cache, run the test suite.
-- [`OP-04`](operations/OP-04-monitoring.md) — logs, correlation IDs, cost signals, what healthy
-  looks like.
-- [`OP-05`](operations/OP-05-incident-runbook.md) — detection → diagnosis → remediation for each
-  known failure.
-
-### Reference
-
-- [`troubleshooting.md`](troubleshooting.md) — reviewer-facing symptom → fix table.
-- [`reference.md`](reference.md) — HTTP API, statuses, enums, span vocabulary, file layout.
+- [OP-01 — Installation](operations/OP-01-install.md) — read this when you are standing the
+  service up for the first time.
+- [OP-02 — Configuration](operations/OP-02-configure.md) — read this when you need to know what a
+  setting does, its default, and its effect.
+- [OP-03 — Routine operations](operations/OP-03-routine-operations.md) — read this when you are
+  starting or stopping the service, editing the policy corpus, adding a sample PR, managing the
+  clone cache, or running the tests.
+- [OP-04 — Monitoring](operations/OP-04-monitoring.md) — read this when you want to know whether
+  the system is healthy, and where the time and money went.
+- [OP-05 — Incident runbook](operations/OP-05-incident-runbook.md) — read this when something has
+  broken and you need detection, diagnosis, remediation, and verification.
 
 ### Deeper reading (engineering notes)
 

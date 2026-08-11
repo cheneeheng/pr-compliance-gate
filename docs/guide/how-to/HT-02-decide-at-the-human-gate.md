@@ -1,9 +1,11 @@
 # HT-02 — How to decide at the human gate
 
-**When:** a review's status badge reads `awaiting_human` and a **Decision** panel is showing.
-**Prerequisites:** you have read the Findings, Investigation, and Escalation panels for that
-review.
-**Time:** as long as you need — the review waits indefinitely and survives a server restart.
+[← Guide index](../index.md)
+
+- **When:** a review's status badge reads `awaiting_human` and a **Decision** panel is showing.
+- **Prerequisites:** you have read the Findings, Investigation, and Escalation panels for that
+  review.
+- **Time:** as long as you need — the review waits indefinitely and survives a server restart.
 
 ## Why the review stopped
 
@@ -55,3 +57,7 @@ it spends from that budget: once the budget is gone, the specialists' remaining 
 no longer trigger a further round, and the review comes back to you escalated with reason
 `max_cycles`. At that point, decide on what you have. Ask your operator if you need a larger
 budget; it is the `GATE_MAX_CYCLES` setting.
+
+---
+
+[← HT-01 Review a pull request](HT-01-review-a-pull-request.md) · [Guide index](../index.md) · [HT-03 Run the demo script →](HT-03-run-the-demo-script.md)

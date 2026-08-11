@@ -1,5 +1,7 @@
 # Troubleshooting (reviewer)
 
+[← Guide index](index.md)
+
 Symptoms you can see in the browser, and what to do about them. Anything requiring a shell belongs
 to your operator — see [`operations/OP-05-incident-runbook.md`](operations/OP-05-incident-runbook.md).
 
