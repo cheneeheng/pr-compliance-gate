@@ -59,6 +59,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Session-scoped registry of created reviews (thread_id -> pr_id). Checkpoints persist on
     # disk; this ordered map just backs the list view (see DECISION_LOG entry 5).
     app.state.reviews = OrderedDict()
+    # thread_id -> the message of the exception that killed its background run. Session-scoped for
+    # the same reason `reviews` is: a crashed run writes no checkpoint, so the failure exists
+    # nowhere else. Without it the UI polls a dead review as `running` forever.
+    app.state.review_errors = {}
     app.state.bg_tasks = set()
     init_tracing(app, settings)
     try:

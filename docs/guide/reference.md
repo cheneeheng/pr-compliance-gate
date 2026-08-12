@@ -111,7 +111,7 @@ Every other field is last-write-wins.
 
 | Set | Values |
 |---|---|
-| Review status | `running`, `awaiting_human`, `done` |
+| Review status | `running`, `awaiting_human`, `done`, `failed` |
 | Change type | `code`, `dependency`, `config`, `docs`, `data_handling` |
 | Risk level | `low`, `medium`, `high` |
 | Specialist | `security`, `license` |
@@ -125,8 +125,13 @@ Every other field is last-write-wins.
 `pr_too_large` and `source_unavailable` are raised while the pull request is being fetched, before
 any model runs. Every other escalation reason is raised mid-pipeline.
 
-`status` is derived, not stored: a populated verdict means `done`, a pending interrupt means
-`awaiting_human`, otherwise `running`.
+`status` is derived, not stored: a populated verdict means `done`, a crashed background run means
+`failed`, a pending interrupt means `awaiting_human`, otherwise `running`.
+
+`failed` is the one status that does not come from the checkpoint — a run that raised wrote no
+verdict, so the reason is held in memory for the life of the process and returned as `error` on
+the detail response. Restart the server and a failed review reads as `running` again; start it
+over rather than trying to resume it.
 
 ## Routing rules
 

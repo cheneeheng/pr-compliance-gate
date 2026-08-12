@@ -68,9 +68,13 @@ def _pending_interrupts(snapshot: Any) -> list[Any]:
     return [intr for task in snapshot.tasks for intr in task.interrupts]
 
 
-def _derive_status(values: dict[str, Any], snapshot: Any) -> str:
+def _derive_status(values: dict[str, Any], snapshot: Any, error: str | None) -> str:
+    """`error` outranks a pending interrupt but not a verdict: a run that crashed after writing
+    its verdict is done, and one that crashed while parked at the gate can no longer be resumed."""
     if values.get("verdict") is not None:
         return "done"
+    if error is not None:
+        return "failed"
     if _pending_interrupts(snapshot):
         return "awaiting_human"
     return "running"
@@ -100,6 +104,10 @@ def _spawn(
                 set_run_outcome_attributes(span, values or {})
         except Exception as exc:  # noqa: BLE001 — background run: log, never crash the app
             log.info("graph_run_error", pr_id=pr_id, error=str(exc))
+            # The run is over and wrote no verdict, so nothing in the checkpoint says why it
+            # stopped. Recorded here or the review polls as `running` forever and the failure —
+            # a bad API key being the common one — lives only in the server log.
+            request.app.state.review_errors[thread_id] = str(exc)
 
     task = asyncio.create_task(_runner())
     request.app.state.bg_tasks.add(task)
@@ -168,7 +176,9 @@ async def list_reviews(request: Request) -> list[dict[str, Any]]:
                 "thread_id": thread_id,
                 "pr_id": registration.pr_id,
                 "source": registration.source,
-                "status": _derive_status(values, snapshot),
+                "status": _derive_status(
+                    values, snapshot, request.app.state.review_errors.get(thread_id)
+                ),
                 "risk_level": risk_level,
             }
         )
@@ -179,6 +189,7 @@ async def list_reviews(request: Request) -> list[dict[str, Any]]:
 async def get_review(thread_id: str, request: Request) -> dict[str, Any]:
     snapshot = await request.app.state.graph.aget_state(_config(thread_id))
     values = snapshot.values or {}
+    error = request.app.state.review_errors.get(thread_id)
     if not values:
         # A review is registered before its background run writes the first checkpoint, and the
         # UI polls as soon as POST returns. Report a known thread as running rather than 404 --
@@ -186,15 +197,23 @@ async def get_review(thread_id: str, request: Request) -> dict[str, Any]:
         registration = request.app.state.reviews.get(thread_id)
         if registration is None:
             raise ReviewNotFoundError(f"no review for thread {thread_id}")
+        # `_derive_status` rather than a literal "running": a run that died before its first
+        # checkpoint — a bad token, a failed clone — has no values to report but is not running.
         return {
-            "status": "running",
+            "status": _derive_status(values, snapshot, error),
             "thread_id": thread_id,
             "pr_id": registration.pr_id,
             "source": registration.source,
             "pr_ref": registration.pr_ref.model_dump() if registration.pr_ref else None,
+            "error": error,
             **_ui_config(),
         }
-    return {"status": _derive_status(values, snapshot), **values, **_ui_config()}
+    return {
+        "status": _derive_status(values, snapshot, error),
+        **values,
+        "error": error,
+        **_ui_config(),
+    }
 
 
 def _ui_config() -> dict[str, Any]:

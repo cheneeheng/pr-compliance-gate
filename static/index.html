@@ -31,6 +31,7 @@
     .badge.running { color: var(--accent); border-color: var(--accent); }
     .badge.awaiting_human { color: var(--warn); border-color: var(--warn); }
     .badge.done { color: var(--ok); border-color: var(--ok); }
+    .badge.failed { color: var(--block); border-color: var(--block); }
     .sev-info { color: var(--muted); } .sev-warn { color: var(--warn); } .sev-block { color: var(--block); font-weight: 600; }
     .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
     .panel h3 { margin: 0 0 8px; font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
@@ -39,6 +40,15 @@
     .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
     fieldset.toolbar { border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; }
     fieldset.toolbar legend { font-size: 13px; padding: 0 6px; }
+    /* One source per row: the two choices are alternatives, and side by side they read as one
+       setting with four controls. The radio label is a fixed column so both rows line up. */
+    fieldset.sources { flex-direction: column; align-items: stretch; gap: 4px; }
+    .source { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+              padding: 10px; border-radius: 6px; border: 1px solid transparent; }
+    .source:has(input:checked) { border-color: var(--border); background: #1d212c; }
+    .source > label { min-width: 132px; }
+    .source > select, .source > input[type="url"] { flex: 1; min-width: 240px; }
+    fieldset.sources > button { align-self: flex-start; margin-top: 8px; }
     label { display: inline-flex; align-items: center; gap: 6px; }
     input:disabled, select:disabled { opacity: 0.5; }
     .row { display: flex; gap: 16px; flex-wrap: wrap; }
@@ -101,13 +111,17 @@
         </tr>`).join("");
 
       view.innerHTML = `
-        <fieldset class="toolbar">
+        <fieldset class="toolbar sources">
           <legend class="muted">Start a review</legend>
-          <label><input type="radio" name="mode" value="fixture" checked /> Sample PR</label>
-          <select id="pr-select" aria-label="Sample PR">${options}</select>
-          <label><input type="radio" name="mode" value="github" /> GitHub PR URL</label>
-          <input id="pr-url" type="url" size="42" aria-label="GitHub PR URL"
-                 placeholder="https://github.com/owner/repo/pull/123" disabled />
+          <div class="source">
+            <label><input type="radio" name="mode" value="fixture" checked /> Sample PR</label>
+            <select id="pr-select" aria-label="Sample PR">${options}</select>
+          </div>
+          <div class="source">
+            <label><input type="radio" name="mode" value="github" /> GitHub PR URL</label>
+            <input id="pr-url" type="url" aria-label="GitHub PR URL"
+                   placeholder="https://github.com/owner/repo/pull/123" disabled />
+          </div>
           <button class="primary" id="start-btn">Start review</button>
         </fieldset>
         ${reviews.length ? `<table><thead><tr><th>PR</th><th>Source</th><th>Status</th><th>Risk</th></tr></thead><tbody>${rows}</tbody></table>`
@@ -270,8 +284,11 @@
         let pending = null;
         if (state.status === "awaiting_human") { pending = await api(`/api/reviews/${threadId}/pending`); }
         renderDecisionPanel(threadId, pending);
-        clearError();
-        if (state.status === "done") stopPolling();
+        // A crashed background run is terminal. Without this the page polls `running` forever
+        // and the reason — a missing or rejected API key, most often — stays in the server log.
+        if (state.status === "failed") showError("Review failed: " + (state.error || "see the server log"));
+        else clearError();
+        if (state.status === "done" || state.status === "failed") stopPolling();
       } catch (e) {
         if (e.status === 404) { showError("Review not found."); stopPolling(); }
         else { showError("Connection issue: " + e.message); }
