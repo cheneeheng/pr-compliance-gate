@@ -225,9 +225,16 @@ scanned", and that distinction is exactly what a reviewer needs.
 - **A failed run still counts** (`tracker.semgrep_runs += 1` before the scan). Otherwise a broken
   scanner is free to retry, and the agent — told the tool is available — burns its turn budget on
   it instead of falling back to `read_file`.
+- **The order of the guardrails is itself the contract**
+  ([`agents/investigator.py:197`](../src/gate/agents/investigator.py)): budget check,
+  `tool_calls += 1`, run cap, sandbox path check, `semgrep_runs += 1`, scan. Three properties come
+  from the order alone — a *refused* call is not counted, so `tool_calls` can never exceed its cap;
+  an over-budget scan attempt still costs a tool call; and a path outside the sandbox costs a tool
+  call but not a scan.
 - **Every failure is a tool *result*, never an exception.** `semgrep unavailable: <reason>` covers
-  a missing binary, an unsupported event loop, a timeout, a non-zero exit, and unparseable output.
-  Nothing raises into the graph; failure lands on a human at the gate.
+  a missing binary, an unsupported event loop, a missing ruleset directory, a timeout, a non-zero
+  exit, and unparseable output. Nothing raises into the graph; failure lands on a human at the
+  gate.
 
 ## 9. Adding a rule
 

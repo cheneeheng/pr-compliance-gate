@@ -208,6 +208,7 @@ Present only when `GATE_OTEL_ENABLED=true`. Use these to write filter queries in
 | `gate.llm.cost_estimate_usd` | LLM spans | Per-call estimate from a static price table. |
 | `gate.investigator.tool_calls`, `gate.investigator.files_examined`, `gate.investigator.semgrep_runs`, `gate.investigator.static_findings` | `gate.investigator.run` | Harness-measured investigation totals. |
 | `tool.name`, `tool.target` | `gate.investigator.tool.*` | Which tool ran, against which sandboxed path. |
+| `gate.semgrep.rule_hits` | `gate.investigator.tool.run_semgrep` | How many hits the scan returned. `0` on a failed run too — the reason reaches the investigation summary, not the span. |
 
 A review that pauses at the human gate produces **two** traces: one up to the pause, one for the
 resumed leg. The UI's **View trace** link points at the first. Search `gate.thread_id` for both.
