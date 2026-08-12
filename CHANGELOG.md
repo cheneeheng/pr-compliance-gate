@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-12
+
 The v2 plan family: live GitHub intake, end-to-end tracing, deterministic policy retrieval, and
 real static analysis inside the investigator.
+
+The pipeline reads real pull requests now, which was the stated condition for lifting the PyPI
+hold. The hold is lifted; publishing remains a separate decision and this release does not take
+it — `publish.yml` is still committed as `.disabled`, so no trigger in it can fire.
 
 ### Added
 
@@ -67,6 +73,18 @@ real static analysis inside the investigator.
   by a closed enum; the threshold for revisiting it is documented rather than left implicit.
 - `PolicyChunk.distance` — there is no similarity score without a similarity search. This is the
   one narrowing in the family and the reason `GATE_STATE_VERSION` exists.
+
+### Security
+
+- Upgraded two locked runtime dependencies off known vulnerabilities: `cryptography`
+  49.0.0 -> 50.0.0 (PYSEC-2026-3552) and `langgraph-checkpoint-sqlite` 3.1.0 -> 3.1.1
+  (PYSEC-2026-3636). Both fit the existing version constraints; only `uv.lock` moved.
+- The release audit's ignore list now names three advisories against `mcp` 1.23.3 —
+  PYSEC-2026-3481, -3482 and -3483 — in place of the `chromadb` entry, which went stale when
+  Chroma was removed. All three are in the package's *server* half; this project imports
+  `ClientSession` and `stdio_client` only and never runs an MCP server. The version is also not a
+  free choice: `semgrep==1.172.0`, the pinned static-analysis extra and the current latest
+  release, pins `mcp==1.23.3` exactly.
 
 ## [0.1.2] - 2026-08-06
 
@@ -211,5 +229,7 @@ Initial release of the PR Compliance Gate MVP.
   The default `pytest` run makes no API calls.
 - `mypy --strict` and `ruff` clean.
 
+[0.2.0]: https://github.com/cheneeheng/pr-compliance-gate/releases/tag/v0.2.0
+[0.1.2]: https://github.com/cheneeheng/pr-compliance-gate/releases/tag/v0.1.2
 [0.1.1]: https://github.com/cheneeheng/pr-compliance-gate/releases/tag/v0.1.1
 [0.1.0]: https://github.com/cheneeheng/pr-compliance-gate/releases/tag/v0.1.0
