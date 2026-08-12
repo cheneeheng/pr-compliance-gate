@@ -1,5 +1,7 @@
 # Getting started
 
+[← Guide index](index.md)
+
 Goal: complete one review end to end and see a verdict, in about five minutes.
 
 ## Before you begin
@@ -7,8 +9,9 @@ Goal: complete one review end to end and see a verdict, in about five minutes.
 - The server is installed and running. If it is not, ask your operator, or follow
   [`operations/OP-01-install.md`](operations/OP-01-install.md) yourself.
 - You can open <http://127.0.0.1:8000> in a browser.
-- The policy corpus has been ingested at least once (an install step). Without it, reviews still
-  run but cite no policy excerpts.
+- The policy corpus is present and valid. There is no ingestion step — retrieval is a
+  deterministic file lookup — and the server refuses to start if the corpus is broken, so if it
+  is running, the corpus is fine.
 
 There is no login. Anyone who can reach the page can start and decide reviews.
 
@@ -43,8 +46,8 @@ There is no login. Anyone who can reach the page can start and decide reviews.
 your review is listed with status `done` and its risk level.
 
 **If it fails:** a red banner at the top of the page names the error. See
-[`troubleshooting.md`](troubleshooting.md); the two most common causes are a missing
-`ANTHROPIC_API_KEY` and a policy corpus that was never ingested.
+[`troubleshooting.md`](troubleshooting.md); the most common causes are a missing
+`ANTHROPIC_API_KEY` and, for a GitHub PR URL, a missing or under-scoped `GATE_GITHUB_TOKEN`.
 
 ## What you just exercised
 

@@ -1,7 +1,7 @@
 """Behavioral eval: each fixture takes its expected route through the graph (ITER_02 §06).
 
-Marked ``llm`` — runs the real pipeline and needs a live ``ANTHROPIC_API_KEY`` plus an ingested
-policy corpus (``uv run python -m gate.intake.ingest``). Asserts the route recorded as
+Marked ``llm`` — runs the real pipeline and needs a live ``ANTHROPIC_API_KEY``. Retrieval is
+deterministic (ITER_01_v2), so this doubles as its regression check. Asserts the route recorded as
 ``expected_route`` in each fixture's ``meta.json``, observed at the point the review first comes
 to rest:
 

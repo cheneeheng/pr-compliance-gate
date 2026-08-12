@@ -1,6 +1,6 @@
 [project]
 name = "pr-compliance-gate"
-version = "0.1.2"
+version = "0.2.0"
 description = "A LangGraph + Claude Agent SDK pipeline that reviews pull requests against security, licensing, and data-handling policy before merge — cost-gated, human-in-the-loop."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -37,15 +37,28 @@ dependencies = [
     "langgraph-checkpoint-sqlite>=2.0",
     # Linear intake leg
     "langchain>=0.3",
-    # Direct import in intake/ingest.py — langchain no longer pulls it in transitively.
+    # Direct import in intake/retrieval.py — langchain no longer pulls it in transitively.
+    # Retained after the Chroma removal: the heading split is still how policy files become
+    # citable chunks.
     "langchain-text-splitters>=0.3",
     "langchain-anthropic>=0.3",
-    "langchain-chroma>=0.2",
-    "chromadb>=1.0",
-    "langchain-huggingface>=0.1",
-    "sentence-transformers>=3.0",
+    # Policy index (data/policies/index.yaml)
+    "pyyaml>=6.0",
     # Investigator harness (SDK is young; pin the minor at install time if its surface moves)
     "claude-agent-sdk>=0.1,<0.2",
+    # Live PR intake: client for the GitHub MCP server, launched as a stdio subprocess from
+    # config. Minor pinned — the SDK surface still moves. No git library: the shallow clone is a
+    # fixed-argv `create_subprocess_exec`, which avoids a dependency and keeps the "no shell"
+    # invariant intact.
+    "mcp>=1.9,<2",
+    # Tracing. OTLP over HTTP, not gRPC: one fewer transport dependency, and Langfuse's
+    # ingestion is HTTP. The Langfuse SDK is deliberately NOT a dependency — Langfuse is
+    # addressed purely as an OTLP endpoint, which is what keeps the instrumentation
+    # vendor-neutral (point the same exporter at Jaeger or Tempo and nothing else changes).
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-http>=1.27",
+    "opentelemetry-instrumentation-fastapi>=0.48b0",
     # API
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
@@ -56,12 +69,20 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Pinned to an exact patch: rule behaviour changes between minors, and an unpinned scanner makes
+# the demo non-reproducible and every eval assertion flaky. Kept as an extra rather than a core
+# dependency because it is a large install and the harness already degrades cleanly without it
+# (`semgrep unavailable: semgrep binary not available`) — so `uv sync` stays light and CI legs on
+# interpreters semgrep has not caught up with still run the full unit suite, where every semgrep
+# path is stubbed.
+semgrep = ["semgrep==1.172.0"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "pytest-cov>=7.1",
     "ruff>=0.6",
     "mypy>=1.11",
+    "types-PyYAML>=6.0",
     "pip-audit>=2.7",
     "pre-commit>=4.0",
 ]
@@ -85,6 +106,7 @@ packages = ["src/gate"]
 # wheel has no repo checkout to read them from. `gate.paths` looks in `_bundled/` first.
 "data" = "gate/_bundled/data"
 "static" = "gate/_bundled/static"
+"rules" = "gate/_bundled/rules"
 
 [tool.hatch.build.targets.sdist]
 # Explicit so the agent workspace, planning notes, and local state stay out of the distribution.
@@ -95,6 +117,7 @@ include = [
     "examples",
     "data",
     "static",
+    "rules",
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
@@ -116,10 +139,8 @@ plugins = ["pydantic.mypy"]
 [[tool.mypy.overrides]]
 # Third-party packages without shipped type stubs.
 module = [
-    "langchain_chroma.*",
-    "langchain_huggingface.*",
-    "chromadb.*",
     "claude_agent_sdk.*",
+    "mcp.*",
     "langgraph.*",
     "langchain_anthropic.*",
     "langchain_text_splitters.*",
@@ -133,8 +154,9 @@ asyncio_mode = "auto"
 python_files = ["test_*.py", "eval_*.py"]
 markers = [
     "llm: tests that make real Anthropic API calls (excluded from the default run)",
+    "network: tests that reach a third-party service, e.g. GitHub (excluded from the default run)",
 ]
-addopts = "-m 'not llm'"
+addopts = "-m 'not llm and not network'"
 
 [tool.coverage.run]
 source = ["gate"]

@@ -1,13 +1,17 @@
-"""Behavioral eval: the full three-fixture demo arc, driven through the API (ITER_04 §06).
+"""Behavioral eval: the four demo beats, driven through the API (ITER_04 §06, ITER_04_v2 §06).
 
-Marked ``llm`` — spins the real graph, hits the real Anthropic API, and needs the policy corpus
-ingested first (``uv run python -m gate.intake.ingest``). Asserts each fixture's terminal
-``verdict.outcome`` matches ``expected_outcome`` in its ``meta.json``. ``eval_routes`` covers the
-complementary half: the route each fixture takes to its first resting point.
+Marked ``llm`` — spins the real graph, hits the real Anthropic API, and needs a policy corpus
+that passes ``validate_policy_index``. Asserts each fixture's terminal ``verdict.outcome`` matches
+``expected_outcome`` in its ``meta.json``. ``eval_routes`` covers the complementary half: the
+route each fixture takes to its first resting point.
+
+Beat 4 (a live GitHub PR) is additionally ``network``-marked, so a green default suite never
+depends on GitHub being up.
 """
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Callable
 from typing import Any
@@ -16,6 +20,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gate.api.app import create_app
+from gate.config import get_settings
 
 pytestmark = pytest.mark.llm
 
@@ -80,3 +85,55 @@ def test_003_request_info_then_approve() -> None:
         _decide(client, tid, "approve")
         state = _wait(client, tid, {"done"})
         assert state["verdict"]["outcome"] == "approved"
+        # Cost gate #2 stayed inside its budgets, and semgrep actually ran — an empty
+        # `static_analysis` alone could not tell "found nothing" from "never ran".
+        investigation = state["investigation"]
+        assert investigation["semgrep_runs"] >= 1
+        assert investigation["tool_calls_count"] <= get_settings().gate_investigator_max_tool_calls
+
+
+def test_a_full_run_is_traced_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cheap, and it stops instrumentation from silently rotting as later iterations add nodes.
+
+    The provider is installed in-process and force-flushed before asserting: a
+    ``BatchSpanProcessor`` buffers, so reading span content without a flush is a race.
+    """
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    from gate.telemetry import tracing as tracing_mod
+
+    memory = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(memory))
+    monkeypatch.setattr(tracing_mod, "_provider", provider)
+
+    with TestClient(create_app()) as client:
+        tid = _start(client, "001_docs_typo")
+        _wait(client, tid, {"done"})
+    provider.force_flush()
+
+    names = {span.name for span in memory.get_finished_spans()}
+    assert {"gate.node.intake", "gate.node.classify", "gate.node.verdict"} <= names
+    run = next(s for s in memory.get_finished_spans() if s.name == "gate.review.run")
+    assert run.attributes["gate.route.taken"] or run.attributes["gate.risk.level"]
+
+
+@pytest.mark.network
+def test_004_a_live_github_pull_request() -> None:
+    """Beat 4 — the one that could not exist in v1: MCP intake, workspace clone, full pipeline."""
+    settings = get_settings()
+    if not settings.gate_github_token:
+        pytest.skip("GATE_GITHUB_TOKEN is not set")
+
+    url = os.environ.get("GATE_EVAL_PR_URL", "https://github.com/psf/requests/pull/6710")
+    with TestClient(create_app()) as client:
+        response = client.post("/api/reviews", json={"pr_url": url})
+        assert response.status_code == 200, response.text
+        tid = response.json()["thread_id"]
+        state = _wait(client, tid, {"done", "awaiting_human"})
+
+    assert state["source"] == "github"
+    assert state["pr_ref"]["html_url"]
+    assert state["classification"] is not None

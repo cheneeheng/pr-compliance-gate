@@ -18,8 +18,12 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from langgraph.types import Command
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from gate.api.app import create_app
+from gate.api.routes import Registration
 from gate.config import get_settings
 from gate.graph.build import _route_after_gate
 from gate.graph.nodes.investigate import investigate
@@ -33,6 +37,7 @@ from gate.graph.state import (
     Severity,
     Specialty,
 )
+from gate.telemetry import tracing as tracing_mod
 
 
 class _Task:
@@ -69,10 +74,14 @@ class _FakeGraph:
 
 
 @contextmanager
-def _client_with(graph: _FakeGraph) -> Iterator[TestClient]:
+def _client_with(
+    graph: _FakeGraph, registration: Registration | None = None
+) -> Iterator[TestClient]:
     app = create_app()
     with TestClient(app) as client:  # run lifespan once (sets a real graph), then override it
         app.state.graph = graph
+        if registration is not None:
+            app.state.reviews["abc"] = registration
         yield client
 
 
@@ -101,6 +110,34 @@ def test_decision_resumes_with_command() -> None:
     assert r.json() == {"status": "resumed"}
     assert isinstance(graph.invoked_with, Command)
     assert graph.invoked_with.resume == {"action": "request_info", "note": "look at auth"}
+
+
+def test_a_resumed_run_is_traced_under_the_registration_not_the_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The registry is the authority while the session lives; the checkpoint is the fallback.
+
+    Asserted on the run span because that is where the two diverge visibly. The snapshot below
+    carries a *different* `pr_id` and no `source`, so a run span reading the fallback would show
+    `t`/`fixture` instead.
+    """
+    memory = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(memory))
+
+    graph = _FakeGraph(_Snapshot({"pr_id": "t"}, interrupted=True))
+    registered = Registration(pr_id="acme/widgets#42", source="github")
+    with _client_with(graph, registered) as client:
+        # After startup, not before: the lifespan's `init_tracing` installs the no-op provider the
+        # test env asks for, and would overwrite an exporter set up any earlier.
+        monkeypatch.setattr(tracing_mod, "_provider", provider)
+        r = client.post("/api/reviews/abc/decision", json={"action": "approve", "note": ""})
+        assert r.status_code == 200
+    # The client block exits through the lifespan, which drains the tracked run — so the span is
+    # closed and exported by the time we read it.
+    run = next(s for s in memory.get_finished_spans() if s.name == "gate.review.run")
+    assert run.attributes["gate.pr_id"] == "acme/widgets#42"
+    assert run.attributes["gate.pr.source"] == "github"
 
 
 async def test_request_info_at_exhausted_budget_reescalates(

@@ -1,0 +1,186 @@
+# Dev-time observability sidecar, not application deployment.
+#
+# The gate itself still runs with `uv run uvicorn gate.api.app:app`; this file starts a trace
+# backend the developer already has locally. The app must also run with all of this down —
+# `GATE_OTEL_ENABLED=false` installs a no-op provider, because a portfolio reviewer cloning the
+# repo should not need Docker to see the gate work.
+#
+# Derived from the official stack at https://github.com/langfuse/langfuse/blob/v3.225.2/docker-compose.yml,
+# trimmed to what this demo uses and pinned to exact tags. Note that `3.225.2` is the newest v3
+# **image**: the git tag `v3.225.3` exists but published no Docker image for either half of the
+# app, so do not "upgrade" the pins to match a release note. **Langfuse v3 needs six services, not
+# three.** Ingestion is asynchronous: `langfuse-web` writes the event body to S3-compatible blob
+# storage and queues it in Redis, and `langfuse-worker` is what lands it in ClickHouse. An earlier
+# revision of this file ran web + postgres + clickhouse only, which has no path from an OTLP POST
+# to a stored trace — that is the likely reason `docs/tracing-design.md` §7.3 was never closed.
+#
+# Dropped from upstream and why: batch export, Azure Blob, OCI object storage, SMTP and Redis TLS
+# are all off by default in the image; the worker's 3030 port and the Postgres, Redis and MinIO
+# console publishes are unused from outside the compose network. ClickHouse keeps a localhost
+# publish on 8123 so you can query it directly to confirm a trace actually landed.
+#
+# The `LANGFUSE_INIT_*` block provisions the org, project, user and API keys on first boot, so
+# verifying tracing is `docker compose up -d` and nothing else — no signup, and the public/secret
+# keys are fixed and can be baked into `.env`. See `docs/guide/operations/OP-01-install.md`.
+#
+# TODO(langfuse-v4): move to Langfuse v4 once ingestion is verified green on v3. v4 makes the
+# OpenTelemetry path the *primary* ingestion API, which is exactly what this repo emits, so it is
+# the better long-term target; it is deferred, not rejected. The cost, the blocker (ClickHouse
+# 25.12) and the trigger are in `docs/tracing-design.md` §9 — read that before touching the pins.
+
+x-langfuse-env: &langfuse-env
+  DATABASE_URL: postgresql://langfuse:langfuse@postgres:5432/langfuse
+  CLICKHOUSE_URL: http://clickhouse:8123
+  CLICKHOUSE_MIGRATION_URL: clickhouse://clickhouse:9000
+  CLICKHOUSE_USER: default
+  CLICKHOUSE_PASSWORD: langfuse
+  CLICKHOUSE_CLUSTER_ENABLED: "false"
+  REDIS_HOST: redis
+  REDIS_PORT: "6379"
+  REDIS_AUTH: langfuse
+  # Event upload is the ingestion path itself, not an optional feature — spans land here before
+  # the worker reads them. `FORCE_PATH_STYLE` is required for MinIO.
+  LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+  LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+  LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+  LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: miniosecret
+  LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+  # Media upload is unused by this repo's spans but kept as upstream ships it: the point of this
+  # stack right now is to remove causes of silent failure, not to minimise YAML.
+  LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+  LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:9090
+  LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: minio
+  LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: miniosecret
+  LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+  # Local-only credentials. Rotate before exposing this beyond localhost.
+  NEXTAUTH_URL: http://localhost:3000
+  SALT: local-dev-salt-change-me
+  # Quotes are load-bearing. Unquoted, YAML reads 64 zeros as a *number* and compose renders it
+  # as `"0"` — a 1-character key. Langfuse validates 64 hex chars and the worker crash-loops on
+  # a ZodError while the web container starts anyway, so the stack looks half-alive.
+  ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+  TELEMETRY_ENABLED: "false"
+
+services:
+  langfuse-web:
+    image: langfuse/langfuse:3.225.2
+    restart: unless-stopped
+    depends_on: &langfuse-depends-on
+      postgres:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      <<: *langfuse-env
+      NEXTAUTH_SECRET: local-dev-secret-change-me
+      # Headless provisioning on first boot. The public/secret pair is fixed on purpose: it makes
+      # `OTEL_EXPORTER_OTLP_HEADERS` a constant the docs can print. Local-only, never a real key.
+      LANGFUSE_INIT_ORG_ID: gate
+      LANGFUSE_INIT_ORG_NAME: PR Compliance Gate
+      LANGFUSE_INIT_PROJECT_ID: pr-compliance-gate
+      LANGFUSE_INIT_PROJECT_NAME: pr-compliance-gate
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-local-dev
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: sk-lf-local-dev
+      # Must be a full address with a TLD — Langfuse validates it and `dev@localhost` is rejected.
+      LANGFUSE_INIT_USER_EMAIL: dev@example.com
+      LANGFUSE_INIT_USER_NAME: dev
+      LANGFUSE_INIT_USER_PASSWORD: local-dev-password
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3.225.2
+    restart: unless-stopped
+    depends_on: *langfuse-depends-on
+    environment: *langfuse-env
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    restart: unless-stopped
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: langfuse
+    ports:
+      # Localhost only, and only so you can query the traces table directly when a span goes
+      # missing and you need to know whether it reached storage or died in the exporter.
+      - "127.0.0.1:8123:8123"
+    volumes:
+      - langfuse-clickhouse:/var/lib/clickhouse
+    healthcheck:
+      # `127.0.0.1`, not `localhost`. Upstream uses `localhost`; busybox wget resolves that to
+      # `[::1]` first, and this container has no IPv6 — the server logs `Listen [::]:8123 failed:
+      # Address family for hostname not supported` and serves IPv4 only. The healthcheck then
+      # fails forever against a database that is up, `depends_on: service_healthy` holds web and
+      # worker in `Created`, nothing listens on 3000, and the app's OTLP exporter reports
+      # `WinError 10061 connection refused` — four steps away from the actual cause.
+      test: wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: --requirepass langfuse --maxmemory-policy noeviction
+    volumes:
+      - langfuse-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+
+  minio:
+    # The one unpinned image: Chainguard's free tier serves `:latest` only. Upstream ships it the
+    # same way. Swap to a dated `minio/minio:RELEASE.*` tag if a moving base ever breaks a demo.
+    image: cgr.dev/chainguard/minio
+    restart: unless-stopped
+    entrypoint: sh
+    # Creates the `langfuse` bucket before starting the server.
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: miniosecret
+    ports:
+      # Published because media upload hands the browser presigned URLs against this host name.
+      - "9090:9000"
+    volumes:
+      - langfuse-minio:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 1s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
+
+volumes:
+  langfuse-postgres:
+  langfuse-clickhouse:
+  langfuse-redis:
+  langfuse-minio:

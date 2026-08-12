@@ -1,7 +1,9 @@
 """Graph wiring: nodes, conditional edges, fan-out/fan-in, checkpointer.
 
 Flow:
-    START -> intake -> classify -> retrieve_policy -> risk_score
+    START -> intake
+    intake --(escalation seeded by a failed load)--> human_gate   (intake short-circuit)
+    intake --(else)--> classify -> retrieve_policy -> risk_score
     risk_score --(score < threshold)--> verdict            (cost gate #1: no Sonnet spend)
     risk_score --(else)--> {security_specialist, license_specialist}  (parallel fan-out)
     {specialists} -> reconcile                              (fan-in via the merge reducer)
@@ -23,6 +25,7 @@ from gate.config import get_settings
 if TYPE_CHECKING:
     from langgraph.checkpoint.base import BaseCheckpointSaver
     from langgraph.graph.state import CompiledStateGraph
+from gate.graph.nodes import traced_node
 from gate.graph.nodes.classify import classify
 from gate.graph.nodes.human_gate import human_gate
 from gate.graph.nodes.intake import intake
@@ -40,6 +43,19 @@ from gate.graph.nodes.verdict import verdict
 from gate.graph.state import DecisionAction, ReviewState
 
 _SPECIALISTS = ["security_specialist", "license_specialist"]
+
+
+def _route_after_intake(state: ReviewState) -> str:
+    """The only edge the v2 family adds.
+
+    An escalation raised by ``load`` (``pr_too_large`` / ``source_unavailable``) exists before the
+    graph has a diff, and reconcile's rule 1 only fires *after* classify, risk and the specialists
+    have run. Routing a diff-less review down that path means asking Haiku to classify nothing and
+    Sonnet to review nothing: spend and noise on a review whose outcome is already decided. Rule 1
+    is unmodified and still catches escalations raised mid-graph — it is just not early enough to
+    be free.
+    """
+    return "human_gate" if state.escalation is not None else "classify"
 
 
 def _route_after_risk(state: ReviewState) -> list[str] | str:
@@ -63,19 +79,25 @@ def build_graph_builder() -> StateGraph[ReviewState]:
     """Construct the uncompiled graph topology (checkpointer added at compile time)."""
     builder: StateGraph[ReviewState] = StateGraph(ReviewState)
 
-    builder.add_node("intake", intake)
-    builder.add_node("classify", classify)
-    builder.add_node("retrieve_policy", retrieve_policy)
-    builder.add_node("risk_score", risk_score)
-    builder.add_node("security_specialist", security_specialist)
-    builder.add_node("license_specialist", license_specialist)
-    builder.add_node("reconcile", reconcile)
-    builder.add_node("investigate", investigate)
-    builder.add_node("human_gate", human_gate)
-    builder.add_node("verdict", verdict)
+    # traced_node is applied here, uniformly, so no node can be silently untraced.
+    for name, fn in (
+        ("intake", intake),
+        ("classify", classify),
+        ("retrieve_policy", retrieve_policy),
+        ("risk_score", risk_score),
+        ("security_specialist", security_specialist),
+        ("license_specialist", license_specialist),
+        ("reconcile", reconcile),
+        ("investigate", investigate),
+        ("human_gate", human_gate),
+        ("verdict", verdict),
+    ):
+        builder.add_node(name, traced_node(fn))
 
     builder.add_edge(START, "intake")
-    builder.add_edge("intake", "classify")
+    builder.add_conditional_edges(
+        "intake", _route_after_intake, {"classify": "classify", "human_gate": "human_gate"}
+    )
     builder.add_edge("classify", "retrieve_policy")
     builder.add_edge("retrieve_policy", "risk_score")
 
@@ -105,6 +127,6 @@ def build_graph_builder() -> StateGraph[ReviewState]:
     return builder
 
 
-# Any saver: `.with_allowlist()` returns a BaseCheckpointSaver clone, not the concrete class.
+# Any saver: `use_state_allowlist()` returns a BaseCheckpointSaver clone, not the concrete class.
 def compile_graph(checkpointer: BaseCheckpointSaver[Any]) -> CompiledStateGraph[ReviewState]:
     return build_graph_builder().compile(checkpointer=checkpointer)

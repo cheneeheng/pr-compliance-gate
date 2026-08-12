@@ -39,10 +39,19 @@ jobs:
       - name: Audit the locked runtime dependencies
         run: |
           uv export --no-dev --no-emit-project --format requirements-txt > requirements.audit.txt
-          # PYSEC-2026-311 (chromadb, no fixed release): pre-auth RCE in the Chroma *server*'s
-          # collections endpoint. This project embeds Chroma via persist_directory and never
-          # serves it, so the vulnerable endpoint does not exist here.
-          uvx pip-audit -r requirements.audit.txt --ignore-vuln PYSEC-2026-311
+          # Three advisories against mcp 1.23.3, all in the package's *server* half. This project
+          # imports `ClientSession` and `stdio_client` only (intake/sources/github_mcp.py) and
+          # never runs an MCP server, so none of the vulnerable code paths exist here:
+          #   PYSEC-2026-3481  server.experimental.enable_tasks() — cross-session task access
+          #   PYSEC-2026-3482  SSE / Streamable HTTP session hijack via a known session id
+          #   PYSEC-2026-3483  deprecated WebSocket transport — no Host/Origin validation
+          # The version is not a choice either: semgrep==1.172.0, the pinned static-analysis
+          # extra and the latest release, pins mcp==1.23.3 exactly. Drop these ignores when
+          # semgrep relaxes that pin and the lock can move to mcp>=1.28.1.
+          uvx pip-audit -r requirements.audit.txt \
+            --ignore-vuln PYSEC-2026-3481 \
+            --ignore-vuln PYSEC-2026-3482 \
+            --ignore-vuln PYSEC-2026-3483
       - uses: actions/upload-artifact@v4
         with:
           name: dist

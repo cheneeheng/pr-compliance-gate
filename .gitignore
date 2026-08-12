@@ -13,10 +13,11 @@ build/
 .env
 checkpoints.db
 checkpoints.db-*
+# Left behind by the pre-v2 vector store; nothing reads it. Safe to delete.
 .chroma/
 
-# Agent session
-.agents_workspace/handoff/
+# Derived: shallow clones of live pull requests, re-created on demand
+data/workspaces/
 
 # Coverage
 .coverage

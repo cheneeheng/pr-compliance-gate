@@ -3,6 +3,12 @@
   "title": "Refactor session validation in auth middleware",
   "expected_classification": "code",
   "expected_route": "human_gate",
-  "expected_investigation_hits": ["auth"],
-  "expected_outcome": "approved"
+  "expected_investigation_hits": [
+    "auth"
+  ],
+  "expected_outcome": "approved",
+  "expected_semgrep_rule_ids": [
+    "gate-sec-01-new-network-egress",
+    "gate-data-03-pii-reaching-a-logger"
+  ]
 }

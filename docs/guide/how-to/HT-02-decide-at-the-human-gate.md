@@ -1,9 +1,11 @@
 # HT-02 — How to decide at the human gate
 
-**When:** a review's status badge reads `awaiting_human` and a **Decision** panel is showing.
-**Prerequisites:** you have read the Findings, Investigation, and Escalation panels for that
-review.
-**Time:** as long as you need — the review waits indefinitely and survives a server restart.
+[← Guide index](../index.md)
+
+- **When:** a review's status badge reads `awaiting_human` and a **Decision** panel is showing.
+- **Prerequisites:** you have read the Findings, Investigation, and Escalation panels for that
+  review.
+- **Time:** as long as you need — the review waits indefinitely and survives a server restart.
 
 ## Why the review stopped
 
@@ -15,6 +17,14 @@ A review reaches you for one of these reasons; the panels tell you which:
 | **Escalation** reason `timeout` | A specialist did not answer in time; nothing was concluded. |
 | **Escalation** reason `max_cycles` | Open questions remain and the investigation budget is spent. |
 | **Escalation** reason `disagreement` | The specialists rated the same policy differently. |
+| **Escalation** reason `pr_too_large` | The pull request changes more files than the configured cap. Nothing was reviewed. |
+| **Escalation** reason `source_unavailable` | The pull request could not be fetched or cloned. Nothing was reviewed. |
+
+The last two stop the review **before** any model runs, so **Findings** and **Investigation** are
+empty and there is nothing to weigh. **Request more info** does not help — there is no diff and no
+repository snapshot for an investigation to read. Fix the cause and start a new review instead;
+your operator has the diagnosis in
+[`../operations/OP-05-incident-runbook.md`](../operations/OP-05-incident-runbook.md).
 
 ## Choose an action
 
@@ -47,3 +57,7 @@ it spends from that budget: once the budget is gone, the specialists' remaining 
 no longer trigger a further round, and the review comes back to you escalated with reason
 `max_cycles`. At that point, decide on what you have. Ask your operator if you need a larger
 budget; it is the `GATE_MAX_CYCLES` setting.
+
+---
+
+[← HT-01 Review a pull request](HT-01-review-a-pull-request.md) · [Guide index](../index.md) · [HT-03 Run the demo script →](HT-03-run-the-demo-script.md)

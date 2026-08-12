@@ -1,8 +1,9 @@
 """Autonomous investigator sub-agent (Claude Agent SDK).
 
 LangGraph sees one node (``investigate``) with one entry and one exit; the Agent SDK owns the
-inner tool loop. The agent gets three read-only, sandboxed tools over the change's repo snapshot
-and hard budgets on turns, tool calls, and per-file bytes. Budget exhaustion or SDK error never
+inner tool loop. The agent gets four read-only, sandboxed tools over the change's workspace — a
+fixture snapshot or a live PR's clone — and hard budgets on turns, tool calls, per-file bytes, and
+semgrep runs. Budget exhaustion or SDK error never
 raises into the graph — it returns an inconclusive report, so failure lands on a human at the
 gate, never in a stack trace.
 
@@ -14,8 +15,8 @@ extraction below is duck-typed on purpose to tolerate minor surface drift.
 
 from __future__ import annotations
 
-import asyncio
-import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -27,14 +28,20 @@ from claude_agent_sdk import (
     query,
     tool,
 )
+from opentelemetry import trace
+from opentelemetry.context import Context
 from pydantic import BaseModel, ConfigDict, Field
 
+from gate.agents.tools.semgrep import render as render_semgrep
+from gate.agents.tools.semgrep import run_semgrep
 from gate.config import Settings
-from gate.graph.state import DecisionAction, InvestigationReport, ReviewState
+from gate.graph.state import DecisionAction, InvestigationReport, ReviewState, StaticFinding
 from gate.llm.models import effort_for, estimate_cost, investigator_model, structured_call
 from gate.llm.prompts import investigator_system
 from gate.logging import get_logger
 from gate.paths import repo_snapshot_dir
+from gate.runtime import UNSUPPORTED_LOOP_REASON, loop_supports_subprocess
+from gate.telemetry.tracing import run_context, tracer
 
 log = get_logger(__name__)
 
@@ -43,6 +50,7 @@ _ALLOWED_TOOLS = [
     f"mcp__{_SERVER_NAME}__read_file",
     f"mcp__{_SERVER_NAME}__grep_repo",
     f"mcp__{_SERVER_NAME}__list_dir",
+    f"mcp__{_SERVER_NAME}__run_semgrep",
 ]
 _GREP_MAX_HITS = 40
 
@@ -53,8 +61,15 @@ class _Tracker:
 
     max_tool_calls: int
     max_file_chars: int
+    max_semgrep_runs: int
+    max_semgrep_results: int
     tool_calls: int = 0
     files_examined: list[str] = field(default_factory=list)
+    semgrep_runs: int = 0
+    static_findings: list[StaticFinding] = field(default_factory=list)
+    # The investigation span's context, captured before the loop starts. Tool closures run inside
+    # the SDK's own tasks, which ambient OTel context does not follow, so it is passed explicitly.
+    span_context: Context | None = None
 
     def budget_exhausted(self) -> bool:
         """True once the cap is spent. Checked *before* incrementing, so a refused call is not
@@ -84,8 +99,27 @@ def resolve_in_sandbox(root: Path, path_str: str) -> Path | None:
     return candidate if candidate.is_relative_to(root) else None
 
 
-def _build_tools(root: Path, tracker: _Tracker) -> list[SdkMcpTool[object]]:
-    """Build the three sandboxed tool closures over ``root``. Separate from server construction
+@contextmanager
+def tool_span(tracker: _Tracker, name: str, target: str) -> Iterator[trace.Span]:
+    """One child span per tool call, carrying the tool name and its sandboxed argument.
+
+    Parented explicitly to the investigation span: the SDK runs tool handlers on its own tasks,
+    which ambient OTel context does not follow. This is what makes cost gate #2 *demonstrable*
+    rather than asserted — the trace shows the harness stopping at its budget.
+
+    Yields the span so a tool can add its own result attributes; duration comes free from the
+    span itself.
+    """
+    with tracer().start_as_current_span(
+        f"gate.investigator.tool.{name}",
+        context=tracker.span_context,
+        attributes={"tool.name": name, "tool.target": target},
+    ) as span:
+        yield span
+
+
+def _build_tools(root: Path, tracker: _Tracker, settings: Settings) -> list[SdkMcpTool[object]]:
+    """Build the four sandboxed tool closures over ``root``. Separate from server construction
     so the sandbox and budget behavior can be unit-tested without running the SDK loop."""
 
     def _resolve(path_str: str) -> Path | None:
@@ -93,18 +127,21 @@ def _build_tools(root: Path, tracker: _Tracker) -> list[SdkMcpTool[object]]:
 
     @tool("read_file", "Read a UTF-8 text file inside the change's repo snapshot.", {"path": str})
     async def read_file(args: dict[str, object]) -> dict[str, object]:
-        if tracker.budget_exhausted():
-            return _tool_text("tool-call budget exhausted; stop and report.", is_error=True)
-        tracker.tool_calls += 1
-        path = _resolve(str(args.get("path", "")))
-        if path is None or not path.is_file():
-            return _tool_text(f"no such file in snapshot: {args.get('path')!r}", is_error=True)
-        rel = path.relative_to(root).as_posix()
-        if rel not in tracker.files_examined:
-            tracker.files_examined.append(rel)
-        return _tool_text(
-            _truncate(path.read_text(encoding="utf-8", errors="replace"), tracker.max_file_chars)
-        )
+        with tool_span(tracker, "read_file", str(args.get("path", ""))):
+            if tracker.budget_exhausted():
+                return _tool_text("tool-call budget exhausted; stop and report.", is_error=True)
+            tracker.tool_calls += 1
+            path = _resolve(str(args.get("path", "")))
+            if path is None or not path.is_file():
+                return _tool_text(f"no such file in snapshot: {args.get('path')!r}", is_error=True)
+            rel = path.relative_to(root).as_posix()
+            if rel not in tracker.files_examined:
+                tracker.files_examined.append(rel)
+            return _tool_text(
+                _truncate(
+                    path.read_text(encoding="utf-8", errors="replace"), tracker.max_file_chars
+                )
+            )
 
     @tool(
         "grep_repo",
@@ -112,48 +149,84 @@ def _build_tools(root: Path, tracker: _Tracker) -> list[SdkMcpTool[object]]:
         {"pattern": str},
     )
     async def grep_repo(args: dict[str, object]) -> dict[str, object]:
-        if tracker.budget_exhausted():
-            return _tool_text("tool-call budget exhausted; stop and report.", is_error=True)
-        tracker.tool_calls += 1
-        pattern = str(args.get("pattern", ""))
-        if not pattern:
-            return _tool_text("empty pattern", is_error=True)
-        hits: list[str] = []
-        for file in sorted(root.rglob("*")):
-            if not file.is_file():
-                continue
-            try:
-                for i, line in enumerate(
-                    file.read_text(encoding="utf-8", errors="replace").splitlines(), start=1
-                ):
-                    if pattern in line:
-                        hits.append(f"{file.relative_to(root).as_posix()}:{i}: {line.strip()}")
-                        if len(hits) >= _GREP_MAX_HITS:
-                            break
-            except OSError:
-                continue
-            if len(hits) >= _GREP_MAX_HITS:
-                break
-        return _tool_text("\n".join(hits) if hits else "no matches")
+        with tool_span(tracker, "grep_repo", str(args.get("pattern", ""))):
+            if tracker.budget_exhausted():
+                return _tool_text("tool-call budget exhausted; stop and report.", is_error=True)
+            tracker.tool_calls += 1
+            pattern = str(args.get("pattern", ""))
+            if not pattern:
+                return _tool_text("empty pattern", is_error=True)
+            hits: list[str] = []
+            for file in sorted(root.rglob("*")):
+                if not file.is_file():
+                    continue
+                try:
+                    for i, line in enumerate(
+                        file.read_text(encoding="utf-8", errors="replace").splitlines(), start=1
+                    ):
+                        if pattern in line:
+                            hits.append(f"{file.relative_to(root).as_posix()}:{i}: {line.strip()}")
+                            if len(hits) >= _GREP_MAX_HITS:
+                                break
+                except OSError:
+                    continue
+                if len(hits) >= _GREP_MAX_HITS:
+                    break
+            return _tool_text("\n".join(hits) if hits else "no matches")
 
     @tool("list_dir", "List entries of a directory inside the repo snapshot.", {"path": str})
     async def list_dir(args: dict[str, object]) -> dict[str, object]:
-        if tracker.budget_exhausted():
-            return _tool_text("tool-call budget exhausted; stop and report.", is_error=True)
-        tracker.tool_calls += 1
-        path = _resolve(str(args.get("path", ".")))
-        if path is None or not path.is_dir():
-            return _tool_text(f"no such directory in snapshot: {args.get('path')!r}", is_error=True)
-        entries = sorted(f"{p.name}/" if p.is_dir() else p.name for p in path.iterdir())
-        return _tool_text("\n".join(entries) if entries else "(empty)")
+        with tool_span(tracker, "list_dir", str(args.get("path", "."))):
+            if tracker.budget_exhausted():
+                return _tool_text("tool-call budget exhausted; stop and report.", is_error=True)
+            tracker.tool_calls += 1
+            path = _resolve(str(args.get("path", ".")))
+            if path is None or not path.is_dir():
+                return _tool_text(
+                    f"no such directory in snapshot: {args.get('path')!r}", is_error=True
+                )
+            entries = sorted(f"{p.name}/" if p.is_dir() else p.name for p in path.iterdir())
+            return _tool_text("\n".join(entries) if entries else "(empty)")
 
-    return [read_file, grep_repo, list_dir]
+    @tool(
+        "run_semgrep",
+        "Run the pinned local semgrep ruleset over a path inside the workspace and return "
+        "rule id, path, line and message for each hit.",
+        {"path": str},
+    )
+    async def run_semgrep_tool(args: dict[str, object]) -> dict[str, object]:
+        with tool_span(tracker, "run_semgrep", str(args.get("path", "."))) as span:
+            if tracker.budget_exhausted():
+                return _tool_text("tool-call budget exhausted; stop and report.", is_error=True)
+            # Semgrep is not exempt from the tool-call budget just because it is deterministic.
+            tracker.tool_calls += 1
+            if tracker.semgrep_runs >= tracker.max_semgrep_runs:
+                return _tool_text(
+                    "semgrep run budget exhausted; do not re-run it on an unchanged tree.",
+                    is_error=True,
+                )
+            path = _resolve(str(args.get("path", ".")))
+            if path is None or not path.exists():
+                return _tool_text(f"no such path in workspace: {args.get('path')!r}", is_error=True)
+            # A failed run still counts. Otherwise a broken scanner is free to retry, and the
+            # agent — told the tool is available — burns its turn budget on it instead of
+            # falling back to read_file.
+            tracker.semgrep_runs += 1
+            findings, reason = await run_semgrep(path, root, settings)
+            # Rule-hit count on the span; the span's own timing supplies the duration.
+            span.set_attribute("gate.semgrep.rule_hits", len(findings))
+            if reason is not None:
+                return _tool_text(f"semgrep unavailable: {reason}", is_error=True)
+            tracker.static_findings.extend(findings[: tracker.max_semgrep_results])
+            return _tool_text(render_semgrep(findings, tracker.max_semgrep_results))
+
+    return [read_file, grep_repo, list_dir, run_semgrep_tool]
 
 
-def _make_server(root: Path, tracker: _Tracker) -> McpSdkServerConfig:
-    """Build the in-process MCP server exposing the three sandboxed tools."""
+def _make_server(root: Path, tracker: _Tracker, settings: Settings) -> McpSdkServerConfig:
+    """Build the in-process MCP server exposing the four sandboxed tools."""
     return create_sdk_mcp_server(
-        name=_SERVER_NAME, version="1.0.0", tools=_build_tools(root, tracker)
+        name=_SERVER_NAME, version="1.0.0", tools=_build_tools(root, tracker, settings)
     )
 
 
@@ -240,38 +313,62 @@ async def _summarize(
     )
 
 
-def _loop_can_spawn_subprocess() -> bool:
-    """Whether the running loop can start the CLI the SDK drives.
-
-    Windows' ``SelectorEventLoop`` cannot: it raises a bare ``NotImplementedError`` whose message
-    is empty, which the SDK reports as ``Failed to start Claude Code:`` with nothing after it.
-    ``uvicorn --reload`` selects exactly that loop (``uvicorn/loops/asyncio.py``, where
-    ``use_subprocess`` — set by ``--reload`` — forces ``SelectorEventLoop`` even on Windows), so
-    the recommended dev command used to disable the investigator with an unreadable error.
-    """
-    if sys.platform != "win32":
-        return True
-    return not isinstance(asyncio.get_running_loop(), asyncio.SelectorEventLoop)
-
-
 async def run_investigation(state: ReviewState, settings: Settings) -> InvestigationReport:
-    """Run the bounded agent loop and return a report. Never raises into the graph."""
-    root = repo_snapshot_dir(state.pr_id).resolve()
+    """Run the bounded agent loop and return a report. Never raises into the graph.
+
+    ``context=`` here does something different from everywhere else it appears. Elsewhere it
+    repairs a lost parent across a task boundary; here the ambient parent is intact — the
+    ``gate.node.investigate`` span is current, since ``traced_node`` wraps the caller on this same
+    task — and passing the *run* context deliberately overrides it. So the investigation lands as
+    a **peer** of the node spans, not a child of ``gate.node.investigate``.
+
+    The trade: ``investigate`` is a six-line pass-through whose whole duration is this call, so
+    nesting would draw two spans of the same length one inside the other. Flat, the investigation
+    reads as one pipeline step alongside the others. Dropping the argument to "use ambient" is
+    therefore not a cleanup — it re-shapes the trace, and
+    ``test_tracing.py::test_the_investigator_span_is_a_peer_of_its_node_not_a_child`` fails.
+    """
+    with tracer().start_as_current_span(
+        "gate.investigator.run",
+        context=run_context(state.thread_id),
+        attributes={"gate.pr_id": state.pr_id, "gate.loop_count": state.loop_count},
+    ) as span:
+        report = await _run_investigation(state, settings, span)
+        span.set_attributes(
+            {
+                "gate.investigator.tool_calls": report.tool_calls_count,
+                "gate.cost.investigator_usd": report.cost_estimate_usd,
+                "gate.investigator.files_examined": len(report.files_examined),
+                "gate.investigator.semgrep_runs": report.semgrep_runs,
+                "gate.investigator.static_findings": len(report.static_analysis),
+            }
+        )
+        return report
+
+
+async def _run_investigation(
+    state: ReviewState, settings: Settings, span: trace.Span
+) -> InvestigationReport:
+    # The sandbox root is injected by the adapter (a fixture's `repo/` snapshot or a live PR's
+    # clone), never derived from `pr_id`. The `resolve()` + `is_relative_to()` check below is
+    # unchanged in mechanism — only where the root comes from moved.
+    root = Path(state.workspace_path or repo_snapshot_dir(state.pr_id)).resolve()
     tracker = _Tracker(
         max_tool_calls=settings.gate_investigator_max_tool_calls,
         max_file_chars=settings.gate_investigator_max_file_chars,
+        max_semgrep_runs=settings.gate_semgrep_max_runs,
+        max_semgrep_results=settings.gate_semgrep_max_results,
+        span_context=trace.set_span_in_context(span),
     )
     if not root.is_dir():
         return InvestigationReport(
             summary=f"investigation inconclusive: no repo snapshot for {state.pr_id}"
         )
-    if not _loop_can_spawn_subprocess():
+    if not loop_supports_subprocess():
         return InvestigationReport(
             summary=(
-                "investigation inconclusive: this event loop cannot spawn a subprocess, so the "
-                "Claude Code CLI the Agent SDK drives cannot start. On Windows, `uvicorn "
-                "--reload` selects a SelectorEventLoop, which has no subprocess support. Restart "
-                "the server without `--reload`."
+                "investigation inconclusive: the Claude Code CLI the Agent SDK drives cannot "
+                f"start — {UNSUPPORTED_LOOP_REASON}"
             )
         )
 
@@ -286,7 +383,7 @@ async def run_investigation(state: ReviewState, settings: Settings) -> Investiga
                 settings.gate_model_investigator, settings.gate_model_investigator_effort
             ),
             system_prompt=_system_prompt(settings),
-            mcp_servers={_SERVER_NAME: _make_server(root, tracker)},
+            mcp_servers={_SERVER_NAME: _make_server(root, tracker, settings)},
             allowed_tools=_ALLOWED_TOOLS,
             max_turns=settings.gate_investigator_max_turns,
             # The SDK spawns the Claude Code CLI, which inherits os.environ -- and the key is
@@ -298,12 +395,22 @@ async def run_investigation(state: ReviewState, settings: Settings) -> Investiga
                 else {}
             ),
         )
+        turn = 0
         async for message in query(prompt=prompt, options=options):
-            text = _message_text(message)
-            if text:
-                transcript_parts.append(text)
-            if type(message).__name__ == "ResultMessage":
-                cost = _extract_cost(message, settings)
+            turn += 1
+            # One span per agent turn. Opened and closed around the message rather than held
+            # open across the await: the SDK yields turn-by-turn, so a span per yielded message
+            # is the honest granularity available without reaching into its internals.
+            with tracer().start_as_current_span(
+                "gate.investigator.turn",
+                context=tracker.span_context,
+                attributes={"gate.turn": turn, "gate.message_type": type(message).__name__},
+            ):
+                text = _message_text(message)
+                if text:
+                    transcript_parts.append(text)
+                if type(message).__name__ == "ResultMessage":
+                    cost = _extract_cost(message, settings)
     except Exception as exc:  # noqa: BLE001 — failure must land on a human, not the graph
         log.info("investigation_error", pr_id=state.pr_id, error=str(exc))
         return InvestigationReport(
@@ -311,6 +418,8 @@ async def run_investigation(state: ReviewState, settings: Settings) -> Investiga
             files_examined=tracker.files_examined,
             tool_calls_count=tracker.tool_calls,
             cost_estimate_usd=cost,
+            static_analysis=tracker.static_findings,
+            semgrep_runs=tracker.semgrep_runs,
         )
 
     # Final structured-output turn: the loop gathered evidence; this distils it into the report.
@@ -325,6 +434,8 @@ async def run_investigation(state: ReviewState, settings: Settings) -> Investiga
             files_examined=tracker.files_examined,
             tool_calls_count=tracker.tool_calls,
             cost_estimate_usd=cost,
+            static_analysis=tracker.static_findings,
+            semgrep_runs=tracker.semgrep_runs,
         )
 
     return InvestigationReport(
@@ -333,4 +444,6 @@ async def run_investigation(state: ReviewState, settings: Settings) -> Investiga
         files_examined=tracker.files_examined,
         tool_calls_count=tracker.tool_calls,
         cost_estimate_usd=cost,
+        static_analysis=tracker.static_findings,
+        semgrep_runs=tracker.semgrep_runs,
     )

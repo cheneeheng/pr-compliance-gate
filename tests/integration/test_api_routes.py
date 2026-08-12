@@ -125,7 +125,17 @@ def test_a_started_review_reads_as_running_before_its_first_checkpoint() -> None
         thread_id = client.post("/api/reviews", json={"pr_id": "001_docs_typo"}).json()["thread_id"]
         body = client.get(f"/api/reviews/{thread_id}").json()
 
-    assert body == {"status": "running", "thread_id": thread_id, "pr_id": "001_docs_typo"}
+    assert body == {
+        "status": "running",
+        "thread_id": thread_id,
+        "pr_id": "001_docs_typo",
+        "source": "fixture",
+        "pr_ref": None,
+        "error": None,
+        # Empty because the default suite runs with GATE_OTEL_ENABLED=false, which is exactly
+        # what makes the UI omit the "View trace" link rather than render a dead one.
+        "langfuse_ui_base": "",
+    }
 
 
 def test_pending_returns_the_review_packet_or_204() -> None:
@@ -137,13 +147,29 @@ def test_pending_returns_the_review_packet_or_204() -> None:
         assert client.get("/api/reviews/abc/pending").status_code == 204
 
 
-async def test_a_failed_background_run_is_logged_not_crashed() -> None:
-    """The graph runs detached; an exception there must not take the app down with it."""
-    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(bg_tasks=set())))
+async def test_a_failed_background_run_is_recorded_not_crashed() -> None:
+    """The graph runs detached; an exception there must not take the app down with it -- but it
+    must not vanish either, or the UI polls a dead review as `running` forever."""
+    state = SimpleNamespace(bg_tasks=set(), review_errors={})
+    request = SimpleNamespace(app=SimpleNamespace(state=state))
 
-    async def _boom() -> None:
+    async def _boom(_trace_id: str | None) -> None:
         raise RuntimeError("graph exploded")
 
-    _spawn(request, _boom(), pr_id="t")  # type: ignore[arg-type]
+    _spawn(request, _boom, pr_id="t", thread_id="abc", source="fixture")
     while request.app.state.bg_tasks:
         await asyncio.sleep(0)
+    assert state.review_errors == {"abc": "graph exploded"}
+
+
+def test_a_recorded_run_failure_reads_as_failed_in_both_views() -> None:
+    """`failed` outranks a pending interrupt: a run that died at the gate cannot be resumed."""
+    graph = _FakeGraph(_Snapshot({"pr_id": "001_docs_typo"}, interrupted=True))
+    with _client_with(graph) as client:
+        thread_id = client.post("/api/reviews", json={"pr_id": "001_docs_typo"}).json()["thread_id"]
+        client.app.state.review_errors[thread_id] = "no API key"  # type: ignore[attr-defined]
+        detail = client.get(f"/api/reviews/{thread_id}").json()
+        rows = client.get("/api/reviews").json()
+
+    assert detail["status"] == "failed" and detail["error"] == "no API key"
+    assert rows[0]["status"] == "failed"

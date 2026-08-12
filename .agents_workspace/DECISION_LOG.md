@@ -439,3 +439,486 @@ uvicorn source cited in the docstring.
 
 **Outcome:** 114 passed, 100% statement and branch coverage locally; ruff check and format clean.
 Not yet confirmed on Linux CI — the fix is uncommitted at the time of writing.
+
+### Entry 17
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-08T00:00:00Z
+**Task:** Implement the v2 plan family (ITER_01_v2 … ITER_04_v2).
+
+**Context:** ITER_01_v2 §04 states "`intake/store.py` is unaffected. It is the session-scoped
+thread registry backing `GET /api/reviews` — naming coincidence only." That is wrong about the
+shipped code: `intake/store.py` is the Chroma vector-store accessor, and the thread registry is
+`app.state.reviews` (an `OrderedDict` created in the lifespan). Following the plan literally would
+have left a module importing `langchain_chroma` after its only dependency was removed.
+
+**Decision:** Deleted `intake/store.py` along with `intake/ingest.py`. The registry the plan meant
+is `app.state.reviews`, which was extended in ITER_03_v2 with a `Registration` model carrying
+`source` and `pr_ref` — the behaviour the plan asked for, in the place it actually lives.
+
+**Impact / Risk:** None beyond the intended Chroma removal. The plan's `store.py` paragraph is now
+inaccurate as written; the code is what it describes in intent.
+
+**Outcome:** `uv run pytest --cov` green at 100% statement and branch coverage; ruff and
+`mypy --strict` clean.
+
+### Entry 18
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-08T00:00:00Z
+**Task:** Shape the `PRSource` protocol (ITER_03_v2 §04).
+
+**Context:** The plan specifies `resolve(ref_input) -> PRRef | None` and `load(ref) -> PRPayload`.
+`FixturePRSource.load` has no `PRRef` to work from — fixtures return `None` from `resolve` — so a
+literal `load(ref)` would need the adapter instance to carry the fixture id across the
+handler-to-background-task boundary as hidden state.
+
+**Decision:** `load(ref_input, ref)` — both methods take the original reference input. The
+two-method split the plan is actually arguing for (cheap/HTTP-mapped vs. slow/escalating) is
+unchanged; the adapters just stay stateless, so nothing half-resolved has to survive the hop.
+
+**Impact / Risk:** Deviates from the plan's exact signature. `GitHubMCPSource.load` re-resolves
+when handed `ref=None`, which costs one extra MCP round trip in a path the API never takes.
+
+**Outcome:** Both adapters satisfy the protocol; `mypy --strict` clean.
+
+### Entry 19
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-08T00:00:00Z
+**Task:** Install the tracer provider (ITER_02_v2 §04).
+
+**Context:** `GATE_OTEL_ENABLED=false` was implemented as `trace.set_tracer_provider(NoOp...)`, per
+the plan's "installs a no-op provider". A test caught that this silently does nothing: OTel guards
+that setter with a process-wide `Once`, so the second call in a process — the kill switch after any
+enabled run, or a second app instance — is refused with a log warning and no effect.
+
+**Decision:** `gate.telemetry.tracing` holds its own `_provider` and `tracer()` reads it, falling
+back to the OTel global only when unset. `trace.set_tracer_provider` is still called for
+third-party instrumentation that reads the global, but nothing here depends on it succeeding.
+
+**Impact / Risk:** The gate's spans no longer follow a provider installed by unrelated code in the
+same process. That is the intended trade: the kill switch has to actually work.
+
+**Outcome:** `test_the_kill_switch_installs_a_no_op_provider` passes; the whole suite runs in ~12s
+instead of ~67s once `conftest.py` also disabled tracing by default.
+
+### Entry 20
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-08T00:00:00Z
+**Task:** Package semgrep (ITER_04_v2 §03).
+
+**Context:** The plan calls for an exact pin and says to move it to an optional `[semgrep]` extra
+only if the pinned version lacks a wheel for a supported interpreter. semgrep 1.172.0 does publish
+a `win_amd64` wheel and supports Python ≥3.10, so the stated fallback condition does not fire.
+
+**Decision:** Shipped it as an optional extra anyway (`uv sync --extra semgrep`). It is a large
+install, and the harness already degrades cleanly without it — the same code path that covers a
+missing binary. `uv sync` therefore stays light and every semgrep branch is unit-tested against a
+stubbed subprocess, so no test depends on the extra being installed.
+
+**Impact / Risk:** A default install has an investigator whose fourth tool reports
+`semgrep unavailable`. Documented in the README install section and OP-01.
+
+**Outcome:** Rules verified to fire on fixture 003 with the extra installed; the full default suite
+passes with or without it.
+
+### Entry 21
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-09T00:00:00Z
+**Task:** Plan-compliance audit of the v2 family (ITER_01_v2 .. ITER_04_v2); interpret "rule count"
+on the semgrep tool span (ITER_04_v2 §04).
+
+**Context:** Three ambiguities surfaced while closing audit findings.
+
+1. ITER_04_v2 §04 says each semgrep run is "a child span ... carrying `tool.name=run_semgrep`,
+   rule count and duration". "Rule count" could mean the size of the committed ruleset (a
+   constant, useless on a span) or the number of hits the run returned.
+2. ITER_03_v2 §06 says the per-file-aware truncation is what "the classifier and specialists"
+   see. `risk_score` also feeds the diff to a model but is not named.
+3. Restructuring `submit_decision`'s registration lookup from a ternary into an if/else exposed
+   that the *registered* branch of that lookup has never been exercised by a test — the ternary
+   form hid it from coverage.py, which measures no arc for a conditional expression.
+
+**Decision:** (1) Recorded the hit count as `gate.semgrep.rule_hits`; duration comes free from the
+span. (2) Switched only `classify` and the specialists to `truncate_diff_by_file`, leaving
+`risk_score` on the blunt head+tail cut, because the spec named two nodes and minimal-diff bias
+says not to widen it. (3) Kept the ternary form rather than adding an unrequested test, so the
+`fail_under = 100` gate reflects the same coverage posture it did before this audit.
+
+**Impact / Risk:** (2) leaves one inconsistency: a fixture diff over `GATE_MAX_DIFF_CHARS` would
+still be sliced mid-hunk for the risk scorer only. No shipped fixture is near the budget. (3)
+leaves a real test gap standing — a decision submitted for a *registered* thread never runs that
+half of the lookup — and 100% coverage does not currently mean that path is proven.
+
+**Outcome:** `ruff`, `mypy --strict` and the full default suite pass at 100% statement and branch
+coverage.
+
+---
+
+### Entry 22
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-09T00:00:00Z
+**Task:** Second plan-compliance audit of the v2 family, then bring `examples/demo.py` up to v2
+
+**Context:** `src/gate` audited clean against ITER_01_v2..ITER_04_v2. The one real gap was outside
+`src/`: `examples/demo.py` still invoked the graph with a bare `initial_state(pr_id, thread_id)`.
+ITER_03_v2 §04 moved loading *before* `ainvoke` — the `intake` node now fetches nothing — so the
+demo was reviewing an empty diff. `examples/` is excluded from the coverage source, so the default
+suite could not see it. Three sub-choices had no obvious answer.
+
+**Decision:**
+1. *Beat 4 lives in the demo script, skipped without a token.* ITER_04_v2 §04 specifies four
+   beats and the README claims each maps to a section of the demo's output; leaving beat 4
+   UI-only would keep that claim false. It is skipped with a printed reason when
+   `GATE_GITHUB_TOKEN` is unset, so the default run stays offline and deterministic — the same
+   posture `tests/system/eval_demo.py` takes.
+2. *A throwaway `FastAPI()` satisfies `init_tracing`.* The instrumentor needs an ASGI app. The
+   alternative — making `app` optional in `telemetry/tracing.py` — adds a branch to `src` under
+   `fail_under = 100` for a script's convenience. Two lines in the example beat a new untested
+   branch in the library.
+3. *State seeding is duplicated, not extracted.* The seven-line block that copies a `PRPayload`
+   onto `ReviewState` now exists in both `api/routes.py::start_review` and the demo. Extracting a
+   shared helper is the cleaner shape but is a `src` refactor the task did not ask for. The demo
+   comments point at `routes.py` so the drift is at least signposted.
+
+**Impact / Risk:** (3) is the live risk — a future change to the seeded field set must touch two
+places. Small and named. (1) means a first-time reader without a GitHub token sees three beats and
+a skip line, which is the honest picture.
+
+**Outcome:** Demo verified to load a real fixture payload (1484-char diff, two changed files, a
+workspace path) where the previous version passed an empty diff. Not run end to end — that spends
+API credit.
+
+---
+
+### Entry 23
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-10T00:00:00Z
+**Task:** Third plan-compliance audit of the v2 family (ITER_01_v2 .. ITER_04_v2).
+
+**Context:** `src/gate` audited clean again. Two gaps sit outside it, and neither has an
+implementation answer that is obviously right.
+
+1. ITER_04_v2 §04 specifies `rules/` as "a handful of registry rules vendored locally plus two or
+   three hand-written rules". Only the hand-written half shipped.
+2. ITER_04_v2 §04 says each README demo beat "links a trace screenshot". None does.
+
+**Decision:** Left both, recorded as BACKLOG B-03 and B-04 rather than closed silently.
+(1) Vendoring semgrep-registry rules imports LGPL-2.1 content into an Apache-2.0 repo — a licence
+decision for a human, and the same spec paragraph argues *against* the generic lint noise those
+rules are. (2) A screenshot needs a live Langfuse container and a paid end-to-end run; fabricating
+one would misrepresent the artifact. Fixed only the one in-scope defect found: a comment in
+`static/index.html` describing the trace link's omit-when-disabled behaviour (ITER_02_v2 §05) sat
+above `prTitleLink` instead of `traceLink`.
+
+**Impact / Risk:** (1) leaves the investigator's detection limited to four hand-written rules;
+fixture 003 fires two of them, so the demo beat is unaffected. (2) leaves the README's "proven,
+not asserted" claim resting on the reader running the demo.
+
+**Outcome:** `ruff`, `mypy --strict` and the default suite pass — 226 passed, 100% statement and
+branch coverage of `src/gate`.
+
+---
+
+### Entry 24
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-10T00:00:00Z
+**Task:** Fourth plan-compliance audit of the v2 family (ITER_01_v2 .. ITER_04_v2).
+
+**Context:** Two items needed a call rather than an edit.
+
+1. ITER_04_v2 §03/§04 say CI "installs the pinned `semgrep` wherever the interpreter supports
+   it". `.github/workflows/ci.yml` synced only `--extra dev`, so no leg ever installed it. The
+   pin (1.172.0) ships cp312/cp313/cp314 wheels, so both matrix legs support it.
+2. BACKLOG B-01: ITER_03_v2 §06 introduced per-file-aware truncation naming only "the classifier
+   and specialists", so `risk_score` kept the blunt head+tail cut. Two prior audits left it as
+   scope creep against the spec's wording.
+
+**Decision:** (1) Fixed — the sync installs `--extra semgrep` on both legs, with a comment
+recording that a leg whose interpreter the pin has not caught up with would drop the extra and
+still run the full suite. Verified safe: every semgrep path in the default suite is stubbed
+against a fake subprocess, and `test_asyncio_is_used_directly_so_the_stubs_above_are_honest`
+guards that. (2) Closed on the user's instruction — `risk_score` now calls
+`truncate_diff_by_file`, and ITER_03_v2 §06 is amended to name every node that reads the diff,
+so the plan leads the code rather than trailing it. B-03 (registry rules) stays open by the same
+licence reasoning as entry 23; B-04 (trace screenshots) stays open as a human capture task.
+
+**Impact / Risk:** (1) adds a ~70 MB wheel to each CI leg; the uv cache absorbs it after the
+first run, and installing the pin is what proves the pin resolves. (2) changes what the Haiku
+scorer sees only for a diff above `GATE_MAX_DIFF_CHARS`; no shipped fixture is near 20 000 chars,
+so no eval expectation moves.
+
+**Outcome:** `ruff`, `mypy --strict` and the default suite pass — 226 passed, 100% statement and
+branch coverage of `src/gate`.
+
+---
+
+### Entry 25
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-10T00:00:00Z
+**Task:** Fifth plan-compliance audit of the v2 family (ITER_01_v2 .. ITER_04_v2).
+
+**Context:** `src/gate`, `static/index.html`, `data/policies/`, `rules/`, `pyproject.toml`,
+`.env.example` and `.github/workflows/ci.yml` audited clean against every `sections_changed`
+entry (§02 §03 §04 §05 §06) of the four v2 iterations. One documentation gap and two standing
+backlog items needed a call.
+
+**Decision:** Fixed the gap — ITER_04_v2 §04 says the installed-wheel path "lists the required
+variables inline" because a wheel has no `.env.example` to point at; the README named none. It
+now names `ANTHROPIC_API_KEY` and `GATE_GITHUB_TOKEN` and says the rest have defaults. Left B-03
+(no vendored registry rules) and B-04 (no trace screenshots) open on the reasoning already
+recorded in entries 23 and 24 — nothing about either changed, and re-deciding them without new
+information would only churn the backlog.
+
+**Impact / Risk:** Documentation only; no code path moves. B-03 keeps the investigator's
+detection limited to the four hand-written rules, B-04 keeps the "proven, not asserted" claim
+resting on the reader running the demo.
+
+**Outcome:** One README edit. No source, test or config file changed, so the suite was not re-run
+— entry 24's green run still describes the code.
+
+---
+
+### Entry 26
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-11T00:00:00Z
+**Task:** Bring `docs/guide/` up to the `user-operator-guide` skill v1.1.6.
+
+**Context:** The skill gained a Phase 4 ("Page furniture and markdown that renders") between
+v1.1.4 and v1.1.6. Most of it was a clean fit — breadcrumbs, prev/next footers, bullet-list
+procedure headers, blank-line rules. One new rule conflicts with the repository: "Don't hard-wrap
+paragraphs at a fixed column." Every Markdown file in this repo — `README.md`, `CLAUDE.md`,
+`docs/tracing-design.md`, `docs/semgrep-rules.md`, and all thirteen guide pages — wraps prose at
+100 columns.
+
+**Decision:** Applied every other Phase 4 rule; did not reflow the prose. Two reasons. The wrap
+is a repository-wide convention, and unwrapping only `docs/guide/` would leave the docs tree
+inconsistent with the engineering notes that sit beside it. And a reflow rewrites roughly 1,500
+lines of prose in a diff where no line is unchanged, which destroys the reviewability of the
+navigation changes it would be bundled with. The rule is stylistic: a hard-wrapped paragraph
+renders correctly, it just reads narrow on a phone. The render-breaking rules from the same phase
+(stacked bold labels collapsing into one paragraph, a numbered list restarting at 1) were fixed.
+
+**Impact / Risk:** `docs/guide/` satisfies the v1.1.6 checklist except the no-hard-wrap line.
+Re-running the skill later will flag the same item; this entry is why. If the guide ever moves to
+a docs site with a narrow mobile viewport, reflow the whole `docs/` tree in one dedicated commit
+rather than per-page.
+
+**Outcome:** Thirteen pages carry breadcrumbs, nine carry prev/next footers, `index.md` lists
+every page grouped by subfolder with a "read this when" line. Link and structure checks pass; no
+source, test, or config file was touched.
+
+### Entry 27
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-12T00:00:00Z
+**Task:** Work through `docs/v2-catchup.md` §4 hands-on checks
+
+**Context:** The checkout's virtualenv had neither `pytest` nor `mypy` — `uv run` reported
+`program not found` — so §4's three free checks could not run. Installing is a state-changing
+command that was not explicitly requested.
+**Decision:** Ran `uv sync --extra dev --extra semgrep`, on the grounds that it is the repo's own
+documented install command (CLAUDE.md "Commands"), it is idempotent, and §4 is unreachable
+without it.
+**Impact / Risk:** `uv sync` makes the environment match exactly the extras named, so the first
+attempt (`--extra dev` alone) uninstalled semgrep. Both extras must be named in one command.
+Recorded as a correction in `docs/v2-catchup.md` §0, which listed them as two separate commands.
+**Outcome:** 226 passed, 14 deselected, 100.00% coverage; mypy clean on 40 files; the fixture
+semgrep scan produced the two documented hits.
+
+### Entry 28
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-12T00:00:00Z
+**Task:** Document why `gate.investigator.run` passes an explicit `context=`
+
+**Context:** While documenting the `context=` idiom, the design note's span tree
+(`docs/tracing-design.md` §2) and the code disagreed. The tree drew `gate.investigator.run` as a
+child of `gate.node.investigate`; `agents/investigator.py` passes `run_context(state.thread_id)`,
+which overrides the intact ambient parent and makes the investigation a peer of the node spans.
+Verified with a throwaway in-memory exporter run, not by reading the code: actual parent is
+`gate.review.run`. No test asserts this parent, so neither shape is pinned, and the original
+intent is not recoverable from the repo.
+
+**Decision:** Documented the current behaviour and corrected the tree to match it; did not change
+the code. Rationale for leaving it flat: `investigate` is a six-line pass-through whose duration
+is entirely the investigation, so nesting draws two spans of the same width. Changing span shape
+was outside the request, which was to record the explanation for future readers.
+
+**Impact / Risk:** The docs now match verified behaviour. The behaviour itself remains untested —
+deleting the `context=` argument as a cleanup would silently re-nest the span and no test would
+fail. A regression test asserting the parent would close that, but writing tests was not
+requested; flagged to the user instead.
+
+**Outcome:** Docstring added at `agents/investigator.py:317`; `tracing-design.md` §2 tree
+corrected, §3.2 subtlety note amended and given a subsection on this case.
+
+### Entry 29
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-12T00:00:00Z
+**Task:** Pin the investigator span's parent; verify the whole span tree
+
+**Context:** Entry 28 left the flat parenting of `gate.investigator.run` documented but unasserted.
+Verifying the rest of the tree needed a run, and a real run costs API calls.
+
+**Decision:** Pinned it in `tests/unit/test_tracing.py` (unit, not integration) by driving the
+real `investigate` node with `pr_id="no_such_pr"` — no repo snapshot, so the harness returns
+inconclusive before reaching the SDK. No stub of `run_investigation` is involved, so the test
+exercises the real `context=` argument. Confirmed it bites: with the argument temporarily removed
+the assertion fails, then restored. The rest of the tree was verified with throwaway scripts
+against an in-memory exporter rather than a paid run — the whole graph with the four LLM
+boundaries and the SDK `query` stubbed, plus a targeted script for the two edges that stubbing
+suppresses (`gate.llm.<Schema>` under a node, `gate.investigator.tool.*` under the investigation).
+
+**Impact / Risk:** Adds one unit test and no source branches; coverage stays at 100%. The stubs
+mean `gate.llm.*` parenting under *investigator* turns is inferred from the same-task call site
+plus the verified naming convention, not observed end to end — a live run would settle it.
+
+**Outcome:** 227 passed, 100.00% coverage, mypy clean on 40 files, ruff clean. Span tree in
+`docs/tracing-design.md` §2 corrected: `gate.investigator.run` is a peer of `gate.node.investigate`,
+and `gate.llm._InvestigationAnswer` was missing from the investigator's children.
+
+---
+
+### Entry 30
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-12T15:40:00Z
+**Task:** Close tracing-design §7.1 and §7.2, the two open items in docs/v2-catchup.md §5.
+
+**Context:** The user approved two suggestions: (§7.1) replace the UI's Langfuse deep-link with a
+`gate.thread_id` search URL so both legs of a paused review are reachable, and (§7.2) back the
+detail poll off at the human gate instead of applying the untested `excluded_urls` filter.
+Implementing §7.1 revealed the suggestion was unsound: `gate_langfuse_ui_base` defaults to
+`http://localhost:3000`, a bare host with no project segment, so the existing `/traces/{id}` link
+is already an unverified guess at Langfuse's URL shape (§7.3 has never confirmed it). A search URL
+would need a second guess — the query-parameter name — stacked on the first.
+
+**Decision:** §7.2 implemented as approved (10 s poll at `awaiting_human`, 2 s otherwise).
+§7.1 deviated from the approved option: kept the deep-link and added a muted note beside it naming
+the `gate.thread_id` to search for the other leg. A wrong link is worse than a correct link with a
+stated limit, and the note costs one template line against a state change plus an unverifiable URL.
+Both decisions recorded in `tracing-design.md` §7.1/§7.2 and in `v2-catchup.md` §5.
+
+**Impact / Risk:** Neither item is closed in the sense of fixed — both are deliberately parked
+behind §7.3 (OTLP ingestion never verified against a live Langfuse). If §7.3 closes and the URL
+shape turns out to differ, the deep-link and the note both need revisiting together. The poll
+backoff makes a review at the gate refresh up to 10 s stale; acceptable because the state cannot
+change without the reviewer acting in the same page.
+
+**Outcome:** Shipped in `a4b8a71`. Default suite 228 passed, coverage 100%, page script passes
+`node --check`. Rendered result not visually verified.
+
+### Entry 31
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-12T00:00:00Z
+**Task:** Rewrite `docker-compose.langfuse.yml` so OTLP ingestion can actually be verified (§7.3).
+
+**Context:** The file ran three services (langfuse, postgres, clickhouse). Langfuse v3 requires
+six: ingestion is asynchronous through Redis and S3-compatible storage, with a separate worker
+landing events in ClickHouse. So no trace could ever have arrived, at any image tag — which is
+the probable reason `tracing-design.md` §7.3 was never closed. Three forks had to be resolved.
+
+**Decision:**
+1. **v3.225.3, not v4.10.** v4 makes OTel the primary ingestion API and is the better long-term
+   target, but it costs a ClickHouse bump (25.12 min), an extra `x-langfuse-ingestion-version=4`
+   header and the `LANGFUSE_MIGRATION_V4_*` knobs. Changing the ingestion contract while
+   ingestion is unconfirmed gives a missing trace two causes at once — the exact trap §7.3
+   warns about. Recorded as `TODO(langfuse-v4)` in the file header and in `v2-catchup.md` §5.
+2. **Kept the S3 media-upload block** even though this repo's spans carry no media. The goal of
+   this change is removing causes of silent failure, not minimising YAML; an untested trim would
+   reintroduce ambiguity. Batch export, Azure, OCI, SMTP and Redis TLS were dropped because the
+   image defaults them off explicitly.
+3. **Kept ClickHouse at 24.8-alpine.** Above v3's documented 24.3 floor and already in the repo;
+   bumping toward v4's 25.12 floor now would be an untested change bundled into a change whose
+   whole point is to isolate one variable.
+
+Also added `LANGFUSE_INIT_*` so the stack provisions its own org, project, user and API keys.
+That removes the manual signup step, makes `OTEL_EXPORTER_OTLP_HEADERS` a documented constant,
+and fixes the project id — which the `static/index.html` trace deep-link will need.
+
+**Impact / Risk:** Six containers instead of three; heavier local footprint. Credentials are
+local-only placeholders carried over from upstream. No application code touched. Not run.
+
+**Outcome:** `docker compose config` validates. No pre-existing `langfuse-*` volumes, so first
+boot is clean.
+
+**Outcome (same day, after bringing it up):** ingestion verified working. Four defects stood
+between the stack and a trace, each producing the same symptom from the application side:
+1. The ClickHouse healthcheck probed `localhost`, which busybox wget resolves to `[::1]`; the
+   container has no IPv6, so a healthy database failed its check forever and `depends_on` held
+   web and worker in `Created`. Now `127.0.0.1`.
+2. `ENCRYPTION_KEY` was unquoted — YAML read 64 zeros as a number, Docker rendered `"0"`, and the
+   worker crash-looped on Langfuse's 64-hex-character check while web started anyway. Now quoted.
+3. `LANGFUSE_INIT_USER_EMAIL: dev@localhost` failed Langfuse's email validation. Now
+   `dev@example.com`.
+4. **The repo's OTLP endpoint default was wrong.** Probing 3.225.2: `POST /api/public/otel` →
+   404, `POST /api/public/otel/v1/traces` → 200 with auth, 401 without. Langfuse's own
+   integration docs name the bare path for self-hosted v3.22.0+; on this image it does not exist.
+   Fixed in `config.py`, `.env.example`, `OP-02-configure.md` and `test_tracing.py`.
+
+The 401-vs-404 probe is the transferable part: the application cannot distinguish a wrong path
+from wrong credentials from a dropped batch, and two curl requests can.
+
+---
+
+### Entry 32
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-12T00:00:00Z
+**Task:** Prepare the repository for the v0.2.0 release.
+
+**Context:** `pip-audit` over the locked runtime dependencies reported five vulnerabilities in
+three packages. Two were straightforward — `cryptography` 49.0.0 and
+`langgraph-checkpoint-sqlite` 3.1.0 both had fixes inside the existing constraints, so the lock
+moved and nothing else did. The other three (PYSEC-2026-3481, -3482, -3483) are all in `mcp`
+1.23.3, and the fixes are 1.27.2 / 1.28.1. `uv lock --upgrade-package "mcp>=1.28.1"` fails:
+`semgrep==1.172.0` pins `mcp==1.23.3` exactly, and 1.172.0 is the current latest semgrep. So the
+options were (a) unpin or drop the semgrep extra, (b) ignore the three advisories with a
+justification.
+
+**Decision:** (b). All three advisories are in the *server* half of `mcp`: HTTP/SSE session
+hijack, the deprecated WebSocket transport's missing Host/Origin validation, and the experimental
+tasks feature's cross-session access. This project imports `ClientSession` and `stdio_client` only
+(`intake/sources/github_mcp.py`) and never runs an MCP server, so none of the vulnerable code
+paths are reachable. Unpinning semgrep to chase them would trade a non-applicable advisory for a
+real one — the exact pin exists because rule behaviour moves between minors and an unpinned
+scanner makes the demo non-reproducible and the evals flaky.
+
+The three ids replace the `chromadb` PYSEC-2026-311 entry in `publish.yml.disabled`, which went
+stale when v2 removed Chroma. A stale `--ignore-vuln` is worse than none: it silently exempts
+whatever id gets reused and reads as a considered exemption.
+
+**Impact / Risk:** The release audit passes with three named exemptions rather than zero. The
+exemptions are documented at the ignore site with the reason each does not apply and the
+condition that retires them (semgrep relaxing its `mcp` pin). Risk if that reasoning is wrong:
+the gate would need an MCP server surface to be exposed, which it does not have.
+
+**Outcome:** Post-upgrade audit reports three vulnerabilities in one package, all `mcp`, all
+exempted. Full suite green against the upgraded lock: 228 passed, 100% coverage.

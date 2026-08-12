@@ -12,7 +12,11 @@ ASSET_ROOT = _BUNDLED if _BUNDLED.is_dir() else Path(__file__).resolve().parents
 DATA_DIR = ASSET_ROOT / "data"
 SAMPLE_PRS_DIR = DATA_DIR / "sample_prs"
 POLICIES_DIR = DATA_DIR / "policies"
+POLICY_INDEX = POLICIES_DIR / "index.yaml"
 STATIC_DIR = ASSET_ROOT / "static"
+# The semgrep ruleset is a runtime asset like the policy corpus: an installed wheel with no rules
+# has an investigator whose scanner fails silently as "no static findings".
+RULES_DIR = ASSET_ROOT / "rules"
 
 
 def repo_snapshot_dir(pr_id: str) -> Path:

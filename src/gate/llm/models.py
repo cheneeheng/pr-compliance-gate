@@ -8,13 +8,17 @@ and no node ever constructs raw messages itself.
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from langchain_anthropic import ChatAnthropic
+from langchain_core.callbacks import UsageMetadataCallbackHandler
 from langchain_core.messages import HumanMessage, SystemMessage
+from opentelemetry.trace import Span
 from pydantic import BaseModel
 
 from gate.config import ModelEffort, Settings, get_settings
+from gate.telemetry.tracing import tracer
 
 # Static per-model price table, USD per 1M tokens (input, output). An ESTIMATE for the demo's
 # cost display — not billing truth. Keyed by the env-configured model id; unknown ids fall back
@@ -100,8 +104,59 @@ async def structured_call[T: BaseModel](
         "json_schema" if model.reasoning_effort else "function_calling"
     )
     structured = model.with_structured_output(schema, method=method)
-    result = await structured.ainvoke([SystemMessage(content=system), HumanMessage(content=user)])
+    usage = UsageMetadataCallbackHandler()
+    with tracer().start_as_current_span(
+        f"gate.llm.{schema.__name__}",
+        attributes={
+            "gen_ai.system": "anthropic",
+            "gen_ai.request.model": model.model,
+            "gen_ai.operation.name": "chat",
+            # Langfuse renders these as the prompt/completion pair rather than a bare timing bar.
+            "input.value": f"{system}\n\n{user}",
+            # This pairing is not optional bookkeeping: an effort setting turns on adaptive
+            # thinking, the API then refuses to force a tool call, and `function_calling` loses
+            # its guarantee. That is the exact combination that silently broke the specialists in
+            # v1 — recorded here, the next occurrence is a filter query, not a debugging session.
+            "gate.llm.effort": model.reasoning_effort or "",
+            "gate.llm.structured_output_method": method,
+        },
+    ) as span:
+        result = await structured.ainvoke(
+            [SystemMessage(content=system), HumanMessage(content=user)],
+            config={"callbacks": [usage]},
+        )
+        _record_usage(span, model.model, usage)
+        span.set_attribute("output.value", str(result))
     return result  # type: ignore[return-value]  # with_structured_output returns schema instance
+
+
+def _record_usage(span: Span, model_id: str, handler: UsageMetadataCallbackHandler) -> None:
+    """Copy token counts off the callback handler onto the LLM span.
+
+    ``with_structured_output`` returns the parsed schema instance, not the raw ``AIMessage``, so
+    usage is collected through a callback rather than read off the result — the alternative
+    (``include_raw=True``) would change the return shape and move schema-validation failures from
+    an exception into a field nobody checks.
+
+    Thinking tokens get their own attribute rather than being folded into
+    ``gen_ai.usage.output_tokens``, which stays exactly as the API reports it: an effort setting
+    makes thinking a real cost line, and burying it inside a conventional attribute would make
+    the two unreconcilable against a bill.
+    """
+    metadata = handler.usage_metadata.get(model_id)
+    if metadata is None:
+        return
+    output_details = metadata.get("output_token_details") or {}
+    span.set_attributes(
+        {
+            "gen_ai.usage.input_tokens": metadata.get("input_tokens", 0),
+            "gen_ai.usage.output_tokens": metadata.get("output_tokens", 0),
+            "gate.llm.thinking_tokens": output_details.get("reasoning", 0),
+            "gate.llm.cost_estimate_usd": estimate_cost(
+                model_id, metadata.get("input_tokens", 0), metadata.get("output_tokens", 0)
+            ),
+        }
+    )
 
 
 def estimate_cost(model_id: str, input_tokens: int, output_tokens: int) -> float:
@@ -117,3 +172,35 @@ def truncate_diff(diff: str, max_chars: int) -> str:
     half = max_chars // 2
     dropped = len(diff) - 2 * half
     return f"{diff[:half]}\n[... truncated {dropped} chars ...]\n{diff[-half:]}"
+
+
+def truncate_diff_by_file(diff: str, max_chars: int) -> str:
+    """Assemble a diff file-by-file until the budget is reached, rather than slicing mid-hunk.
+
+    Real pull requests are larger and noisier than fixtures, so the budget bites more often. The
+    strategy is unchanged in spirit — the same ``GATE_MAX_DIFF_CHARS`` cap — but the classifier
+    and specialists now always see *whole* hunks, and the files the budget dropped are named in
+    the trailing marker so a specialist can flag "I could not see X" instead of judging in
+    ignorance.
+    """
+    if len(diff) <= max_chars:
+        return diff
+    sections = re.split(r"(?m)^(?=diff --git )", diff)
+    kept: list[str] = []
+    dropped: list[str] = []
+    used = 0
+    for section in sections:
+        header = re.match(r"diff --git a/.+ b/(.+)", section)
+        name = header.group(1) if header else "(preamble)"
+        if header is not None and used + len(section) > max_chars:
+            dropped.append(name)
+            continue
+        kept.append(section)
+        used += len(section)
+    body = "".join(kept)
+    if not body.strip() or not dropped:
+        # Either nothing survived (one file bigger than the whole budget) or nothing could be
+        # dropped (no `diff --git` headers at all). An empty diff — or a still-oversized one —
+        # is useless to a specialist, so fall back to the blunt head+tail cut.
+        return truncate_diff(diff, max_chars)
+    return f"{body}\n[... {len(dropped)} file(s) omitted for size: {', '.join(dropped)} ...]"

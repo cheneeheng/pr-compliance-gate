@@ -23,6 +23,7 @@
        without href is not focusable or activatable from the keyboard. */
     button.link { color: var(--accent); cursor: pointer; background: none; border: none; padding: 0; }
     button.link:hover { text-decoration: underline; }
+    a { color: var(--accent); }
     table { width: 100%; border-collapse: collapse; }
     th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); }
     th { color: var(--muted); font-weight: 600; font-size: 13px; }
@@ -30,12 +31,26 @@
     .badge.running { color: var(--accent); border-color: var(--accent); }
     .badge.awaiting_human { color: var(--warn); border-color: var(--warn); }
     .badge.done { color: var(--ok); border-color: var(--ok); }
+    .badge.failed { color: var(--block); border-color: var(--block); }
     .sev-info { color: var(--muted); } .sev-warn { color: var(--warn); } .sev-block { color: var(--block); font-weight: 600; }
     .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
     .panel h3 { margin: 0 0 8px; font-size: 14px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
     .muted { color: var(--muted); }
     .banner { background: #3a1c1c; border: 1px solid var(--block); color: #ffb4a8; padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; }
     .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 20px; flex-wrap: wrap; }
+    fieldset.toolbar { border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; }
+    fieldset.toolbar legend { font-size: 13px; padding: 0 6px; }
+    /* One source per row: the two choices are alternatives, and side by side they read as one
+       setting with four controls. The radio label is a fixed column so both rows line up. */
+    fieldset.sources { flex-direction: column; align-items: stretch; gap: 4px; }
+    .source { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+              padding: 10px; border-radius: 6px; border: 1px solid transparent; }
+    .source:has(input:checked) { border-color: var(--border); background: #1d212c; }
+    .source > label { min-width: 132px; }
+    .source > select, .source > input[type="url"] { flex: 1; min-width: 240px; }
+    fieldset.sources > button { align-self: flex-start; margin-top: 8px; }
+    label { display: inline-flex; align-items: center; gap: 6px; }
+    input:disabled, select:disabled { opacity: 0.5; }
     .row { display: flex; gap: 16px; flex-wrap: wrap; }
     .row > div { flex: 1; min-width: 160px; }
     dl { margin: 0; } dt { color: var(--muted); font-size: 13px; } dd { margin: 0 0 8px; }
@@ -60,7 +75,19 @@
     const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
     let pollTimer = null;
-    const stopPolling = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } };
+    let pollMs = 0;
+    const stopPolling = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } pollMs = 0; };
+
+    // Every poll is an HTTP request, and every request is its own single-span trace
+    // (tracing-design.md §7.2) — so the detail view's cadence *is* trace volume. Parked at the
+    // human gate nothing changes until the reviewer acts, so back off 2s -> 10s there: four
+    // minutes of reading drops from ~120 polls to ~24.
+    function schedule(threadId, ms) {
+      if (ms === pollMs) return;
+      stopPolling();
+      pollMs = ms;
+      pollTimer = setInterval(() => pollDetail(threadId), ms);
+    }
 
     function showError(msg) {
       document.getElementById("banner-slot").innerHTML = `<div class="banner" role="alert">${esc(msg)}</div>`;
@@ -90,18 +117,35 @@
       const rows = reviews.map((r) => `
         <tr>
           <td><button type="button" class="link" data-thread="${esc(r.thread_id)}">${esc(r.pr_id)}</button></td>
+          <td>${sourceBadge(r.source)}</td>
           <td><span class="badge ${esc(r.status)}">${esc(r.status)}</span></td>
           <td>${r.risk_level ? esc(r.risk_level) : "—"}</td>
         </tr>`).join("");
 
       view.innerHTML = `
-        <div class="toolbar">
-          <select id="pr-select" aria-label="Sample PR">${options}</select>
+        <fieldset class="toolbar sources">
+          <legend class="muted">Start a review</legend>
+          <div class="source">
+            <label><input type="radio" name="mode" value="fixture" checked /> Sample PR</label>
+            <select id="pr-select" aria-label="Sample PR">${options}</select>
+          </div>
+          <div class="source">
+            <label><input type="radio" name="mode" value="github" /> GitHub PR URL</label>
+            <input id="pr-url" type="url" aria-label="GitHub PR URL"
+                   placeholder="https://github.com/owner/repo/pull/123" disabled />
+          </div>
           <button class="primary" id="start-btn">Start review</button>
-        </div>
-        ${reviews.length ? `<table><thead><tr><th>PR</th><th>Status</th><th>Risk</th></tr></thead><tbody>${rows}</tbody></table>`
+        </fieldset>
+        ${reviews.length ? `<table><thead><tr><th>PR</th><th>Source</th><th>Status</th><th>Risk</th></tr></thead><tbody>${rows}</tbody></table>`
                          : `<p class="muted">No reviews yet — start one above.</p>`}`;
 
+      view.querySelectorAll('input[name="mode"]').forEach((radio) => {
+        radio.onchange = () => {
+          const live = selectedMode() === "github";
+          document.getElementById("pr-url").disabled = !live;
+          document.getElementById("pr-select").disabled = live;
+        };
+      });
       document.getElementById("start-btn").onclick = startReview;
       view.querySelectorAll("[data-thread]").forEach((a) => { a.onclick = () => renderDetail(a.dataset.thread); });
       pollTimer = setInterval(async () => {
@@ -114,17 +158,32 @@
       document.querySelectorAll("[data-thread]").forEach((a) => {
         const r = map[a.dataset.thread]; if (!r) return;
         const tr = a.closest("tr");
-        tr.children[1].innerHTML = `<span class="badge ${esc(r.status)}">${esc(r.status)}</span>`;
-        tr.children[2].textContent = r.risk_level || "—";
+        tr.children[2].innerHTML = `<span class="badge ${esc(r.status)}">${esc(r.status)}</span>`;
+        tr.children[3].textContent = r.risk_level || "—";
       });
     }
 
+    const selectedMode = () => document.querySelector('input[name="mode"]:checked').value;
+    const sourceBadge = (source) => `<span class="badge">${esc(source || "fixture")}</span>`;
+
+    // Same regex intent as the server, so an obvious typo does not cost a round trip. The server
+    // remains the authority and its 422 renders in the existing red banner.
+    const PR_URL_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+\/?$/;
+
     async function startReview() {
-      const pr_id = document.getElementById("pr-select").value;
+      const live = selectedMode() === "github";
+      const pr_url = document.getElementById("pr-url").value.trim();
+      if (live && !PR_URL_RE.test(pr_url)) {
+        showError("Expected https://github.com/{owner}/{repo}/pull/{number}");
+        return;
+      }
+      const body = live ? { pr_url } : { pr_id: document.getElementById("pr-select").value };
       const btn = document.getElementById("start-btn");
+      // A live PR costs one MCP round trip where a fixture was instant; the clone runs after,
+      // in the background, so the review simply sits in `running` with its source badge.
       btn.disabled = true; btn.textContent = "Starting…";
       try {
-        const { thread_id } = await api("/api/reviews", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ pr_id }) });
+        const { thread_id } = await api("/api/reviews", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
         clearError();
         renderDetail(thread_id);
       } catch (e) {
@@ -137,6 +196,30 @@
     function panel(title, bodyHtml) { return `<div class="panel"><h3>${esc(title)}</h3>${bodyHtml}</div>`; }
     const orDash = (v, fn) => (v == null ? `<span class="muted">—</span>` : fn(v));
 
+    function prTitleLink(s) {
+      const ref = s.pr_ref;
+      if (!ref || !ref.html_url) return "";
+      return `<a href="${esc(ref.html_url)}" target="_blank" rel="noopener">${esc(ref.title || ref.html_url)}</a>`;
+    }
+
+    // Omitted entirely when tracing is off, rather than rendered disabled: the disabled
+    // convention is for controls whose backend arrives in a later iteration, and a permanently
+    // dead button is worse than no button.
+    // Links the backend's home page, not the trace. A deep link needs Langfuse's per-version URL
+    // shape (v3.225.2 serves traces under /project/{id}/traces/{id}, earlier notes assumed
+    // /traces/{id}); that shape is not ours to own, and a link that 404s is worse than one click
+    // of navigation. The thread id is printed instead — searching it finds *both* legs of a
+    // review that paused at the human gate, which the old deep link could not reach at all
+    // (tracing-design.md §7.1).
+    // `trace_id` still gates rendering: no trace id means the run produced no trace, so there is
+    // nothing to go looking for.
+    function traceLink(s) {
+      if (!s.trace_id || !s.langfuse_ui_base) return "";
+      const href = s.langfuse_ui_base.replace(/\/$/, "");
+      return `<a href="${esc(href)}" target="_blank" rel="noopener">Open Langfuse</a>
+        <span class="muted">search <code>gate.thread_id=${esc(s.thread_id)}</code></span>`;
+    }
+
     function findingsHtml(findings) {
       if (!findings || !findings.length) return `<span class="muted">—</span>`;
       const by = {};
@@ -147,6 +230,23 @@
           ${f.needs_more_context ? ' <em class="muted">(needs context)</em>' : ""}</li>`).join("")}</ul></div>`).join("");
     }
 
+    // The empty state keys off semgrep_runs, not off the list. `static_analysis` defaults to [],
+    // so an empty list alone cannot tell "ran and found nothing" from "never ran" — and that is
+    // exactly the distinction a reviewer needs: one means the change is clean, the other means
+    // the evidence is missing. A failed run counts, so it lands in the "no findings" case and
+    // the reason reaches the reviewer through the investigation summary.
+    function staticAnalysisHtml(inv) {
+      if (!inv.semgrep_runs) return `<span class="muted">—</span>`;
+      const rows = inv.static_analysis || [];
+      if (!rows.length) return `<span class="muted">no static findings</span>`;
+      const byPath = {};
+      rows.forEach((f) => { (byPath[f.path] ||= []).push(f); });
+      return Object.entries(byPath).map(([path, fs]) => `
+        <div><strong>${esc(path)}</strong><ul>${fs.map((f) => `
+          <li><span class="sev-${esc(f.severity)}">${esc(f.severity)}</span> · ${esc(f.rule_id)}
+          (line ${esc(f.line)}) — ${esc(f.message)}</li>`).join("")}</ul></div>`).join("");
+    }
+
     function renderDetailFromState(s) {
       const view = document.getElementById("view");
       const c = s.classification, r = s.risk, inv = s.investigation, esc_ = s.escalation, v = s.verdict;
@@ -154,12 +254,15 @@
         <div class="toolbar">
           <button type="button" class="link" id="back">← Reviews</button>
           <span class="badge ${esc(s.status)}">${esc(s.status)}</span>
+          ${sourceBadge(s.source)}
           <span class="muted">${esc(s.pr_id)}</span>
+          ${prTitleLink(s)}
+          ${traceLink(s)}
         </div>
         ${panel("Classification", orDash(c, (c) => `<dl><dt>Type</dt><dd>${esc(c.change_type)}</dd><dt>Summary</dt><dd>${esc(c.summary)}</dd><dt>Touched areas</dt><dd>${esc((c.touched_areas || []).join(", ")) || "—"}</dd></dl>`))}
         ${panel("Risk", orDash(r, (r) => `<div class="row"><div><dt>Score</dt><dd>${esc(r.score)}</dd></div><div><dt>Level</dt><dd>${esc(r.level)}</dd></div><div><dt>Model</dt><dd>${esc(r.model_used)}</dd></div></div><dt>Reasons</dt><dd><ul>${(r.reasons || []).map((x) => `<li>${esc(x)}</li>`).join("") || "—"}</ul></dd>`))}
         ${panel("Findings", findingsHtml(s.specialist_findings))}
-        ${panel("Investigation", orDash(inv, (i) => `<dl><dt>Summary</dt><dd><pre>${esc(i.summary)}</pre></dd><dt>Tool calls</dt><dd>${esc(i.tool_calls_count)}</dd><dt>Cost estimate</dt><dd>$${Number(i.cost_estimate_usd || 0).toFixed(4)}</dd><dt>Files examined</dt><dd>${esc((i.files_examined || []).join(", ")) || "—"}</dd></dl>`))}
+        ${panel("Investigation", orDash(inv, (i) => `<dl><dt>Summary</dt><dd><pre>${esc(i.summary)}</pre></dd><dt>Budget</dt><dd>${esc(i.tool_calls_count)} tool call(s) · ${esc(i.semgrep_runs || 0)} semgrep run(s) · $${Number(i.cost_estimate_usd || 0).toFixed(4)}</dd><dt>Files examined</dt><dd>${esc((i.files_examined || []).join(", ")) || "—"}</dd><dt>Static analysis</dt><dd>${staticAnalysisHtml(i)}</dd></dl>`))}
         ${panel("Escalation", orDash(esc_, (e) => `<span class="sev-warn">${esc(e.reason)}</span> — ${esc(e.detail)}`))}
         ${panel("Verdict", orDash(v, (v) => `<strong>${esc(v.outcome)}</strong><br/>${esc(v.rationale)}`))}
         <div id="decision-slot"></div>`;
@@ -202,8 +305,12 @@
         let pending = null;
         if (state.status === "awaiting_human") { pending = await api(`/api/reviews/${threadId}/pending`); }
         renderDecisionPanel(threadId, pending);
-        clearError();
-        if (state.status === "done") stopPolling();
+        // A crashed background run is terminal. Without this the page polls `running` forever
+        // and the reason — a missing or rejected API key, most often — stays in the server log.
+        if (state.status === "failed") showError("Review failed: " + (state.error || "see the server log"));
+        else clearError();
+        if (state.status === "done" || state.status === "failed") stopPolling();
+        else schedule(threadId, state.status === "awaiting_human" ? 10000 : 2000);
       } catch (e) {
         if (e.status === 404) { showError("Review not found."); stopPolling(); }
         else { showError("Connection issue: " + e.message); }
@@ -214,7 +321,7 @@
       stopPolling();
       document.getElementById("view").innerHTML = `<div class="spinner">Loading review…</div>`;
       pollDetail(threadId);
-      pollTimer = setInterval(() => pollDetail(threadId), 2000);
+      schedule(threadId, 2000);
     }
 
     document.getElementById("home-link").onclick = renderList;

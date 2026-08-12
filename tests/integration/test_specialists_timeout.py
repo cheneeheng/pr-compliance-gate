@@ -21,6 +21,7 @@ from gate.graph.state import (
     ReviewState,
     Severity,
     Specialty,
+    StaticFinding,
 )
 
 
@@ -79,6 +80,67 @@ async def test_each_specialist_sees_only_its_own_policy_slice(
     assert "manifest pins GPL-3.0" in captured["user"]  # investigation feeds the re-run
     # Trust the routing key, not the model: the finding is relabelled to this node's specialty.
     assert update["specialist_findings"][0].specialist == Specialty.license
+
+
+async def test_static_analysis_hits_reach_the_specialist_as_citable_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """So a specialist can raise severity to `block` with rule/path/line behind it rather than
+    with the investigator's prose alone."""
+    captured: dict[str, Any] = {}
+
+    async def _capture(_m: object, _s: object, _sys: str, user: str) -> Any:
+        captured["user"] = user
+        return specialists._FindingList()
+
+    monkeypatch.setattr(specialists, "specialist_model", lambda s=None: object())
+    monkeypatch.setattr(specialists, "structured_call", _capture)
+
+    state = ReviewState(
+        pr_id="t",
+        diff="x",
+        policy_context=[_chunk("SEC-01")],
+        investigation=InvestigationReport(
+            summary="the audit module posts to an external collector",
+            semgrep_runs=1,
+            static_analysis=[
+                StaticFinding(
+                    rule_id="rules.gate-sec-01-new-network-egress",
+                    severity=Severity.warn,
+                    path="src/acme/audit.py",
+                    line=23,
+                    message="SEC-01: new outbound network call",
+                )
+            ],
+        ),
+    )
+    await specialists.security_specialist(state)
+
+    assert "Static analysis hits:" in captured["user"]
+    assert "rules.gate-sec-01-new-network-egress src/acme/audit.py:23 (warn)" in captured["user"]
+
+
+async def test_an_investigation_without_static_hits_adds_no_evidence_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _capture(_m: object, _s: object, _sys: str, user: str) -> Any:
+        captured["user"] = user
+        return specialists._FindingList()
+
+    monkeypatch.setattr(specialists, "specialist_model", lambda s=None: object())
+    monkeypatch.setattr(specialists, "structured_call", _capture)
+
+    state = ReviewState(
+        pr_id="t",
+        diff="x",
+        policy_context=[_chunk("SEC-01")],
+        investigation=InvestigationReport(summary="nothing found", semgrep_runs=1),
+    )
+    await specialists.security_specialist(state)
+
+    assert "Static analysis hits:" not in captured["user"]
 
 
 async def test_the_security_specialist_also_owns_data_handling_policy(

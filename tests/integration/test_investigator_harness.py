@@ -145,7 +145,7 @@ async def test_a_loop_without_subprocess_support_is_named_not_guessed_at(
 ) -> None:
     """Windows' SelectorEventLoop cannot spawn the CLI, and the SDK reports that as an empty
     'Failed to start Claude Code:'. Say what actually happened instead."""
-    monkeypatch.setattr("gate.agents.investigator._loop_can_spawn_subprocess", lambda: False)
+    monkeypatch.setattr("gate.agents.investigator.loop_supports_subprocess", lambda: False)
 
     report = await run_investigation(_state(), get_settings())
 

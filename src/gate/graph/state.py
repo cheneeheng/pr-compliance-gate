@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -48,6 +48,10 @@ class EscalationReason(StrEnum):
     timeout = "timeout"
     disagreement = "disagreement"
     max_cycles = "max_cycles"
+    # Raised by `PRSource.load` before the graph has a diff, and routed by the intake
+    # short-circuit rather than by reconcile (which only runs after the specialists).
+    pr_too_large = "pr_too_large"
+    source_unavailable = "source_unavailable"
 
 
 class DecisionAction(StrEnum):
@@ -68,12 +72,29 @@ class Outcome(StrEnum):
 
 
 class PolicyChunk(BaseModel):
-    """A retrieved slice of a policy document."""
+    """A policy document section, split on its `##` heading and labelled with its policy id.
+
+    No similarity score: retrieval is a deterministic ``change_type`` -> file lookup, so there is
+    nothing to score. ``policy_id`` is the heading's leading token and is the single citation key
+    — a separate ``heading_id`` would be the same value under a second name, leaving specialists
+    two candidate fields to cite.
+    """
 
     text: str
     policy_id: str
     source_file: str
-    distance: float = 0.0  # retrieval score; 0.0 when not from a similarity query
+
+
+class PRRef(BaseModel):
+    """Identity of a live pull request, resolved before a review thread exists."""
+
+    owner: str
+    repo: str
+    number: int
+    head_sha: str
+    base_sha: str = ""
+    html_url: str = ""
+    title: str = ""
 
 
 class Classification(BaseModel):
@@ -110,6 +131,25 @@ class Finding(BaseModel):
     needs_more_context: bool = False
 
 
+class StaticFinding(BaseModel):
+    """One semgrep hit, shaped down from the scanner's JSON.
+
+    ``severity`` reuses the ``Finding`` vocabulary so the UI badge component is shared. ``Finding``
+    is deliberately *not* given a matching ``source`` field: semgrep output is evidence the
+    investigator reports, while a ``Finding`` stays a specialist's policy judgment citing a
+    ``policy_id``. Blurring the two would make "which policy does this violate" unanswerable for
+    machine-generated hits.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    rule_id: str
+    severity: Severity
+    path: str
+    line: int
+    message: str
+
+
 class InvestigationReport(BaseModel):
     """Output of the autonomous investigator sub-agent."""
 
@@ -120,6 +160,11 @@ class InvestigationReport(BaseModel):
     files_examined: list[str] = Field(default_factory=list)
     tool_calls_count: int = 0
     cost_estimate_usd: float = 0.0
+    # Harness-owned, like every other metric here: the model authors narrative only.
+    static_analysis: list[StaticFinding] = Field(default_factory=list)
+    # Distinguishes "ran and found nothing" from "never ran" — `static_analysis` defaulting to
+    # `[]` cannot, and that distinction is exactly what a reviewer needs.
+    semgrep_runs: int = 0
 
 
 class EscalationRecord(BaseModel):
@@ -178,6 +223,22 @@ class ReviewState(BaseModel):
 
     pr_id: str
     thread_id: str = ""
+    # The run span's trace id, seeded by the background task *before* `ainvoke` so it is already
+    # present in the very first checkpoint — including for a review that never reaches a node.
+    # Seeded rather than written by the first node: `traced_node` is applied uniformly and gains
+    # nothing from one node carrying a special responsibility. It is a `str`, so the checkpoint
+    # allowlist is untouched and GATE_STATE_VERSION stays at 2.
+    trace_id: str | None = None
+    # Where the PR came from. All three of these are additive with defaults, so a checkpoint
+    # written earlier in the v2 family still deserializes and GATE_STATE_VERSION stays at 2 —
+    # it exists for the one *narrowing* in this family, and bumping it for purely additive
+    # fields would force a pointless `checkpoints.db` delete and train readers to ignore it.
+    source: Literal["fixture", "github"] = "fixture"
+    pr_ref: PRRef | None = None
+    # The investigator's sandbox root, injected by the adapter rather than derived from `pr_id`.
+    # Null when `load` failed before materializing anything — a non-optional `str` would force an
+    # empty-string sentinel that the sandbox check would then have to special-case.
+    workspace_path: str | None = None
     diff: str = ""
     files_changed: list[str] = Field(default_factory=list)
     policy_context: list[PolicyChunk] = Field(default_factory=list)
@@ -200,7 +261,9 @@ def initial_state(pr_id: str, thread_id: str) -> ReviewState:
 
 # Every domain type that can reach a checkpoint, declared for LangGraph's msgpack allowlist.
 # LangGraph deserializes unregistered types with a warning today and will block them in a future
-# version, so each checkpointer is wrapped in `.with_allowlist(CHECKPOINT_ALLOWLIST)`. Kept
+# version, so each checkpointer is wrapped in `use_state_allowlist(saver)` (graph/checkpoint.py),
+# which *constructs* a serializer with this allowlist — `saver.with_allowlist(...)` merges into the
+# default sentinel `True` and is a silent no-op. Kept
 # explicit rather than derived from `vars()`: an allowlist is a security boundary and is worth
 # reading at a glance. `test_state.py` fails if this drifts from the module.
 CHECKPOINT_ALLOWLIST: tuple[tuple[str, str], ...] = tuple(
@@ -214,9 +277,11 @@ CHECKPOINT_ALLOWLIST: tuple[tuple[str, str], ...] = tuple(
         "DecisionAction",
         "Outcome",
         "PolicyChunk",
+        "PRRef",
         "Classification",
         "RiskAssessment",
         "Finding",
+        "StaticFinding",
         "InvestigationReport",
         "EscalationRecord",
         "HumanDecision",

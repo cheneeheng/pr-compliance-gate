@@ -1,5 +1,7 @@
 # OP-02 — Configuration
 
+[← Guide index](../index.md)
+
 All configuration is environment-driven, read from `.env` in the working directory or from the
 process environment. Settings are loaded **once per process** and cached — every change requires a
 restart.
@@ -18,11 +20,46 @@ Check a setting actually took effect by observing behaviour, not by trusting the
 | Var | Default | Purpose |
 |---|---|---|
 | `GATE_DB_PATH` | `checkpoints.db` | SQLite checkpoint file. Deleting it loses every review's history and any review paused at the human gate. |
-| `GATE_CHROMA_DIR` | `.chroma` | Chroma persistence directory for the policy corpus. Safe to delete — re-create it by re-running ingestion. |
-| `POLICY_COLLECTION` | `policies` | Name of the Chroma collection holding the policy chunks. Note it carries no `GATE_` prefix. Changing it points the app at a different collection inside the same directory — the old one is left behind, and retrieval returns nothing until you re-run ingestion under the new name. |
+| `GATE_STATE_VERSION` | `2` | Schema generation of the checkpointed state, stamped into the database on first use. If it does not match, the app **refuses to start** rather than crashing on resume. There is no migration for local demo data: delete `checkpoints.db` and re-run. |
+| `GATE_POLICY_INDEX` | *(unset)* | Overrides the policy index location. Unset, it resolves to the bundled/repo copy of `data/policies/index.yaml` — never a working-directory-relative path. |
+| `GATE_WORKSPACE_DIR` | `data/workspaces` | Clone cache for live pull requests, keyed by `head_sha`. Safe to delete; it is re-cloned on demand. |
+| `GATE_WORKSPACE_MAX_GB` | `5` | Cache budget. Least-recently-used workspaces are evicted at startup and after each clone. |
 
-Both paths are resolved relative to the process working directory, so start the server from the
-same directory every time or set absolute paths.
+Writable paths are resolved relative to the process working directory, so start the server from
+the same directory every time or set absolute paths. Shipped assets (the policy corpus, the
+semgrep rules, the UI) are resolved from the package instead and never depend on the working
+directory.
+
+## Tracing
+
+| Var | Default | Purpose |
+|---|---|---|
+| `GATE_OTEL_ENABLED` | `true` | Kill switch. `false` installs a no-op tracer: the app runs fully with no trace backend, and the UI omits the **View trace** link entirely rather than rendering a dead one. |
+| `GATE_OTEL_SERVICE_NAME` | `pr-compliance-gate` | `service.name` on every span. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:3000/api/public/otel/v1/traces` | OTLP/HTTP target. **No `GATE_` prefix** — this is the OpenTelemetry SDK's own variable name, kept so anyone who has configured OTel before sets it without reading these docs. |
+| `OTEL_EXPORTER_OTLP_HEADERS` | *(empty)* | `key=value,key2=value2` — carries the Langfuse basic-auth header. Also unprefixed. |
+| `GATE_LANGFUSE_UI_BASE` | `http://localhost:3000` | Used *only* to build the UI's trace deep-link. |
+
+> Getting the two unprefixed names wrong is silent: the exporter falls back to `localhost:4318`,
+> which is usually right in local development and wrong everywhere else, so it shows up as traces
+> vanishing rather than as an error.
+
+## Live GitHub intake
+
+| Var | Default | Purpose |
+|---|---|---|
+| `GATE_GITHUB_TOKEN` | *(empty)* | Read-only PAT: `contents:read` + `pull_requests:read`. No write scopes — the gate never comments, labels, or merges. Passed explicitly to the MCP subprocess, which inherits nothing from `.env`. |
+| `GATE_GH_MCP_COMMAND` | `npx -y @modelcontextprotocol/server-github` | The GitHub MCP server, launched as a stdio subprocess. |
+| `GATE_GH_MAX_FILES` | `300` | Above this, the review escalates with `pr_too_large` instead of reviewing part of the change. A compliance gate that silently misses files is worse than one that refuses. |
+
+## Static analysis
+
+| Var | Default | Purpose |
+|---|---|---|
+| `GATE_SEMGREP_TIMEOUT_S` | `60` | Per-scan wall clock. On expiry the tool reports `semgrep unavailable: timed out …`; the investigation continues. |
+| `GATE_SEMGREP_MAX_RESULTS` | `50` | Hits beyond this are dropped with an explicit "N further results omitted" line. |
+| `GATE_SEMGREP_MAX_RUNS` | `2` | Scans per investigation. Semgrep is deterministic, so re-running an unchanged tree is pure waste. Each run also costs one investigator tool call. |
+| `GATE_SEMGREP_RULES_DIR` | *(unset)* | Overrides the bundled `rules/` directory. `--config auto` is never used: it fetches rules over the network at run time, which breaks the sandbox and makes results non-reproducible. |
 
 ## Models
 
@@ -36,7 +73,6 @@ Each tier is a pair: a model id, and the reasoning effort sent with it.
 | `GATE_MODEL_SPECIALIST_EFFORT` | `high` | Effort for that tier. |
 | `GATE_MODEL_INVESTIGATOR` | `claude-sonnet-5` | The autonomous sub-agent. Only investigations pay for this. |
 | `GATE_MODEL_INVESTIGATOR_EFFORT` | `high` | Effort for that tier, applied to both the sub-agent's tool loop and its final summarizing turn. |
-| `GATE_EMBED_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Local embedding model for policy retrieval. Runs on your machine; no API spend. Changing it requires re-running ingestion. |
 
 > **Warning:** the model ids are defaults, not guarantees. Verify each exists on your account
 > before a real run; an invalid id fails at call time, mid-review.
@@ -84,11 +120,19 @@ returns an inconclusive report rather than raising an error.
 | Var | Default | Effect |
 |---|---|---|
 | `GATE_INVESTIGATOR_MAX_TURNS` | `8` | Maximum model turns in the tool loop. |
-| `GATE_INVESTIGATOR_MAX_TOOL_CALLS` | `15` | Maximum read-only tool calls (`read_file`, `grep_repo`, `list_dir`) across the whole investigation. |
+| `GATE_INVESTIGATOR_MAX_TOOL_CALLS` | `15` | Maximum read-only tool calls across the whole investigation, counting all four tools (`read_file`, `grep_repo`, `list_dir`, `run_semgrep`). |
 | `GATE_INVESTIGATOR_MAX_FILE_CHARS` | `15000` | Maximum characters returned from any single file read. |
 
-The investigator can only read inside `data/sample_prs/<pr_id>/repo/`. Path traversal (`..`) and
-absolute paths are rejected by the sandbox; it has no write, network, or shell access.
+`GATE_SEMGREP_MAX_RUNS` (see [Static analysis](#static-analysis)) is a *second, narrower* ceiling
+on top of this one: a scan must satisfy both. A semgrep run is never exempt from the tool-call
+budget just because it is deterministic, and a run that *fails* still spends from both budgets —
+otherwise a broken scanner could be retried for free until the turn budget died.
+
+The investigator can only read inside the review's workspace — a fixture's
+`data/sample_prs/<pr_id>/repo/` snapshot, or a live pull request's clone under
+`GATE_WORKSPACE_DIR`. The root is injected by the source adapter, never derived from the PR id.
+Path traversal (`..`) and absolute paths are rejected by the sandbox; it has no write, network, or
+shell access.
 
 ## Applying a change
 
@@ -108,3 +152,7 @@ configuration; behaviour is the check.
 
 **If it fails:** confirm you edited the `.env` in the directory the server was started from, and
 that the variable name matches the table exactly.
+
+---
+
+[← OP-01 Installation](OP-01-install.md) · [Guide index](../index.md) · [OP-03 Routine operations →](OP-03-routine-operations.md)

@@ -16,7 +16,17 @@ from gate.graph.state import ReviewState
 
 
 def _tools(root: Path, tracker: _Tracker) -> dict[str, object]:
-    return {t.name: t.handler for t in _build_tools(root, tracker)}
+    return {t.name: t.handler for t in _build_tools(root, tracker, get_settings())}
+
+
+def _tracker(**kw: object) -> _Tracker:
+    defaults: dict[str, object] = {
+        "max_tool_calls": 15,
+        "max_file_chars": 15_000,
+        "max_semgrep_runs": 2,
+        "max_semgrep_results": 50,
+    }
+    return _Tracker(**{**defaults, **kw})  # type: ignore[arg-type]
 
 
 @pytest.fixture
@@ -45,7 +55,7 @@ def test_sandbox_blocks_traversal_and_absolute(tmp_path: Path) -> None:
 
 
 def test_tracker_stops_after_cap() -> None:
-    tracker = _Tracker(max_tool_calls=2, max_file_chars=100)
+    tracker = _tracker(max_tool_calls=2, max_file_chars=100)
     tracker.tool_calls = 1
     assert not tracker.budget_exhausted()
     tracker.tool_calls = 2
@@ -58,8 +68,10 @@ async def test_tools_stop_at_the_cap_and_never_overcount(tmp_path: Path) -> None
     root = tmp_path / "repo"
     root.mkdir()
     (root / "a.txt").write_text("hello", encoding="utf-8")
-    tracker = _Tracker(max_tool_calls=2, max_file_chars=100)
-    read_file = next(t for t in _build_tools(root, tracker) if t.name == "read_file")
+    tracker = _tracker(max_tool_calls=2, max_file_chars=100)
+    read_file = next(
+        t for t in _build_tools(root, tracker, get_settings()) if t.name == "read_file"
+    )
 
     for _ in range(2):
         assert not (await read_file.handler({"path": "a.txt"}))["is_error"]
@@ -73,8 +85,10 @@ async def test_tools_refuse_paths_outside_the_snapshot(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     root.mkdir()
     (tmp_path / "secret.txt").write_text("nope", encoding="utf-8")
-    tracker = _Tracker(max_tool_calls=5, max_file_chars=100)
-    read_file = next(t for t in _build_tools(root, tracker) if t.name == "read_file")
+    tracker = _tracker(max_tool_calls=5, max_file_chars=100)
+    read_file = next(
+        t for t in _build_tools(root, tracker, get_settings()) if t.name == "read_file"
+    )
 
     result = await read_file.handler({"path": "../secret.txt"})
     assert result["is_error"]
@@ -83,7 +97,7 @@ async def test_tools_refuse_paths_outside_the_snapshot(tmp_path: Path) -> None:
 
 async def test_read_file_records_each_file_once_and_truncates(snapshot: Path) -> None:
     (snapshot / "big.txt").write_text("A" * 60 + "B" * 60, encoding="utf-8")
-    tracker = _Tracker(max_tool_calls=5, max_file_chars=40)
+    tracker = _tracker(max_tool_calls=5, max_file_chars=40)
     read_file = _tools(snapshot, tracker)["read_file"]
 
     first = await read_file({"path": "big.txt"})
@@ -94,7 +108,7 @@ async def test_read_file_records_each_file_once_and_truncates(snapshot: Path) ->
 
 
 async def test_grep_repo_reports_path_and_line_number(snapshot: Path) -> None:
-    tracker = _Tracker(max_tool_calls=5, max_file_chars=500)
+    tracker = _tracker(max_tool_calls=5, max_file_chars=500)
     grep_repo = _tools(snapshot, tracker)["grep_repo"]
 
     hit = await grep_repo({"pattern": "def verify"})
@@ -106,7 +120,7 @@ async def test_grep_repo_reports_path_and_line_number(snapshot: Path) -> None:
 async def test_grep_repo_caps_its_own_result_size(snapshot: Path) -> None:
     """One grep must not flood the context window even when the pattern matches everything."""
     (snapshot / "many.txt").write_text("hit\n" * (_GREP_MAX_HITS * 2), encoding="utf-8")
-    tracker = _Tracker(max_tool_calls=5, max_file_chars=10_000)
+    tracker = _tracker(max_tool_calls=5, max_file_chars=10_000)
     grep_repo = _tools(snapshot, tracker)["grep_repo"]
 
     lines = (await grep_repo({"pattern": "hit"}))["content"][0]["text"].splitlines()
@@ -126,7 +140,7 @@ async def test_grep_repo_skips_files_it_cannot_read(
         return real_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(Path, "read_text", _read_text)
-    tracker = _Tracker(max_tool_calls=5, max_file_chars=500)
+    tracker = _tracker(max_tool_calls=5, max_file_chars=500)
     grep_repo = _tools(snapshot, tracker)["grep_repo"]
 
     result = await grep_repo({"pattern": "def verify"})
@@ -134,7 +148,7 @@ async def test_grep_repo_skips_files_it_cannot_read(
 
 
 async def test_list_dir_marks_directories_and_defaults_to_the_root(snapshot: Path) -> None:
-    tracker = _Tracker(max_tool_calls=5, max_file_chars=500)
+    tracker = _tracker(max_tool_calls=5, max_file_chars=500)
     list_dir = _tools(snapshot, tracker)["list_dir"]
 
     assert (await list_dir({}))["content"][0]["text"] == "README.md\nsrc/"
@@ -144,7 +158,7 @@ async def test_list_dir_marks_directories_and_defaults_to_the_root(snapshot: Pat
 
 
 async def test_every_tool_refuses_once_the_budget_is_spent(snapshot: Path) -> None:
-    tracker = _Tracker(max_tool_calls=0, max_file_chars=500)
+    tracker = _tracker(max_tool_calls=0, max_file_chars=500)
     for handler in _tools(snapshot, tracker).values():
         assert (await handler({"path": ".", "pattern": "x"}))["is_error"]
     assert tracker.tool_calls == 0
