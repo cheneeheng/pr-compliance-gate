@@ -23,6 +23,12 @@ Three gotchas are designed for here rather than debugged later:
    :func:`shutdown_tracing` force-flushes, and the lifespan calls it in a ``finally`` *after*
    cancelling the tracked background tasks — reversed, a run still in flight writes to a
    shut-down provider and its tail spans vanish anyway.
+
+Two unrelated types below are both called "context", and mixing them up is the easy mistake.
+``SpanContext`` (``opentelemetry.trace``) is a span's *identity* — trace id, span id, flags; it is
+what a ``traceparent`` header serialises. ``Context`` (``opentelemetry.context``) is the
+*container* holding "the current span", the thing a contextvar carries. ``Link`` takes the first,
+``start_as_current_span(context=)`` takes the second, and neither accepts the other.
 """
 
 from __future__ import annotations
@@ -105,12 +111,25 @@ def shutdown_tracing() -> None:
 
 def tracer() -> trace.Tracer:
     """The gate's tracer, from the provider this module installed."""
+    # `_provider`, never `trace.get_tracer_provider()`: the OTel global stays pinned to the first
+    # provider ever set (see the `_provider` comment above), so reading it back would keep
+    # exporting after `GATE_OTEL_ENABLED=false` swapped in the no-op. The global is the fallback
+    # only for callers outside a lifespan — before `init_tracing`, or after `shutdown_tracing`.
     provider = _provider
     return provider.get_tracer(_TRACER_NAME) if provider else trace.get_tracer(_TRACER_NAME)
 
 
 def current_request_context() -> SpanContext | None:
-    """The in-flight request span's context, captured at handler time to link the run to it."""
+    """The in-flight request span's context, captured at handler time to link the run to it.
+
+    Must be called *in the handler*: the request span is only ever current there and it ends
+    milliseconds later, so the background task that opens the run span cannot recover it.
+
+    Returns the identity, not a ``Context``, because the caller builds a ``Link`` — contrast
+    :func:`run_context`, which returns a container because its caller sets a parent. ``None``
+    under the no-op provider, whose span context is all-zero and therefore not ``is_valid``; that
+    is how ``review_run_span`` ends up with ``links=[]`` without testing the kill switch.
+    """
     span_context = trace.get_current_span().get_span_context()
     return span_context if span_context.is_valid else None
 

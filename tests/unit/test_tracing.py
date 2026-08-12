@@ -138,6 +138,30 @@ async def test_the_parallel_fan_out_shares_the_run_span_as_parent(
     assert {s.parent.span_id for s in node_spans} == {run.get_span_context().span_id}
 
 
+async def test_the_investigator_span_is_a_peer_of_its_node_not_a_child(
+    exporter: InMemorySpanExporter,
+) -> None:
+    """The one `context=` that is not repairing a lost parent — the ambient one is intact here.
+
+    `run_investigation` is called from the `investigate` node on that node's own task, so ambient
+    context would nest it under `gate.node.investigate`. It passes the run context instead, and
+    flat is the intent: `investigate` is a pass-through whose whole duration is this call, so
+    nesting would draw the same span twice. Deleting that argument as a cleanup would silently
+    re-shape the trace, which is what this pins.
+    """
+    from gate.graph.nodes.investigate import investigate
+
+    # An unknown pr_id has no repo snapshot, so the harness returns inconclusive before the SDK.
+    state = ReviewState(pr_id="no_such_pr", thread_id="t-inv")
+    with review_run_span("no_such_pr", "t-inv") as run:
+        await traced_node(investigate)(state)
+
+    spans = tuple(exporter.get_finished_spans())
+    run_span_id = run.get_span_context().span_id
+    assert _named(spans, "gate.node.investigate").parent.span_id == run_span_id
+    assert _named(spans, "gate.investigator.run").parent.span_id == run_span_id
+
+
 async def test_the_run_span_is_a_root_linked_to_the_request_span(
     exporter: InMemorySpanExporter,
 ) -> None:

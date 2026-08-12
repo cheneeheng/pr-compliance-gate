@@ -314,7 +314,20 @@ async def _summarize(
 
 
 async def run_investigation(state: ReviewState, settings: Settings) -> InvestigationReport:
-    """Run the bounded agent loop and return a report. Never raises into the graph."""
+    """Run the bounded agent loop and return a report. Never raises into the graph.
+
+    ``context=`` here does something different from everywhere else it appears. Elsewhere it
+    repairs a lost parent across a task boundary; here the ambient parent is intact — the
+    ``gate.node.investigate`` span is current, since ``traced_node`` wraps the caller on this same
+    task — and passing the *run* context deliberately overrides it. So the investigation lands as
+    a **peer** of the node spans, not a child of ``gate.node.investigate``.
+
+    The trade: ``investigate`` is a six-line pass-through whose whole duration is this call, so
+    nesting would draw two spans of the same length one inside the other. Flat, the investigation
+    reads as one pipeline step alongside the others. Dropping the argument to "use ambient" is
+    therefore not a cleanup — it re-shapes the trace, and
+    ``test_tracing.py::test_the_investigator_span_is_a_peer_of_its_node_not_a_child`` fails.
+    """
     with tracer().start_as_current_span(
         "gate.investigator.run",
         context=run_context(state.thread_id),

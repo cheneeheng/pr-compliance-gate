@@ -65,6 +65,40 @@ trace*, which is why §3.2's failure is silent.
 
 A **trace** is a tree of spans sharing a `trace_id`.
 
+### Two things called "context"
+
+Both types appear in `tracing.py`, from different packages, and they are unrelated. One is an
+identity, the other is a container:
+
+| | `SpanContext` (`opentelemetry.trace`) | `Context` (`opentelemetry.context`) |
+|---|---|---|
+| What it is | A span's **identity** | A **container** of ambient values |
+| Holds | `trace_id`, `span_id`, flags, tracestate | "the current span", baggage |
+| Serialisable | Yes — this *is* the `traceparent` header | No |
+| Answers | "which span?" | "which span is current here?" |
+| Taken by | `Link(...)` | `start_as_current_span(context=...)` |
+
+```
+traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+             ^^ ^------- trace_id (32 hex) ------^ ^--span_id--^ ^flags
+                └──────────── a serialised SpanContext ────────────┘
+```
+
+`trace.set_span_in_context(span)` is the bridge: span in, `Context` out. That is the line stored
+in `_RUN_CONTEXTS` (§3.2). An *empty* `Context()` is what forces a root (§3.1) — a state no
+`SpanContext` can express, because "no span at all" is not an identity.
+
+The two accessors are named for their job rather than their type:
+
+| Function | Returns | Read from | Used for |
+|---|---|---|---|
+| `current_request_context()` | `SpanContext` | the ambient contextvar, in the handler | building a **link** (§3.1) |
+| `run_context(thread_id)` | `Context` | the `_RUN_CONTEXTS` dict, from any task | setting a **parent** (§3.2) |
+
+A `SpanContext` is **valid** only when both ids are non-zero. `NoOpTracerProvider` hands out
+all-zero ids, so `current_request_context()` and `trace_id_of()` return `None` under
+`GATE_OTEL_ENABLED=false` without either function testing the setting (§5).
+
 **Instrumentation, not infrastructure.** Spans are written in application code using real
 semantic conventions and exported over OTLP/HTTP. Langfuse is addressed purely as an endpoint —
 point the same exporter at Jaeger or Tempo and none of the application code changes. Standing up
@@ -89,10 +123,11 @@ POST /api/reviews  ──link──►  gate.review.run          ← ROOT, opene
                                 ├─ gate.node.license_specialist   ┘
                                 ├─ gate.node.reconcile
                                 ├─ gate.node.investigate
-                                │     └─ gate.investigator.run
-                                │           ├─ gate.investigator.turn (×N)
-                                │           ├─ gate.investigator.tool.run_semgrep
-                                │           └─ gate.investigator.tool.read_file
+                                ├─ gate.investigator.run     ← PEER of the node, not its child
+                                │     ├─ gate.investigator.turn (×N)      (why: §3.2)
+                                │     ├─ gate.investigator.tool.run_semgrep
+                                │     ├─ gate.investigator.tool.read_file
+                                │     └─ gate.llm._InvestigationAnswer    (the final turn)
                                 ├─ gate.node.human_gate      ← gate.node.interrupted = true
                                 └─ gate.node.verdict
 ```
@@ -106,13 +141,13 @@ non-reproducible.
 | Concern | Location |
 |---|---|
 | Provider, kill switch, run span, outcome attributes | `src/gate/telemetry/tracing.py` |
-| `init_tracing` / `tracer()` / `review_run_span` / `set_run_outcome_attributes` | same, lines 64 / 106 / 125 / 156 |
+| `init_tracing` / `tracer()` / `review_run_span` / `set_run_outcome_attributes` | same, lines 70 / 112 / 144 / 180 |
 | `traced_node` decorator | `src/gate/graph/nodes/__init__.py:25` |
 | Applied uniformly at wiring time | `src/gate/graph/build.py` (the `add_node` loop) |
 | Run span opened in the background task | `src/gate/api/routes.py:79` (`_spawn`) |
 | Lifespan init + drain-then-flush teardown | `src/gate/api/app.py:63`, `:73` |
 | LLM spans + token capture | `src/gate/llm/models.py:108`, `:133` |
-| Investigator run / turn / tool spans | `src/gate/agents/investigator.py:314`, `:387`, `:103` |
+| Investigator run / turn / tool spans | `src/gate/agents/investigator.py:330`, `:403`, `:113` |
 | Log correlation processor | `src/gate/logging.py:34` |
 | Tests (in-memory exporter) | `tests/unit/test_tracing.py` |
 | Dev-time backend | `docker-compose.langfuse.yml` |
@@ -188,10 +223,10 @@ moment. The tie back to the request is a **span link**, which expresses "related
 implying containment.
 
 ```python
-# routes.py:93 — in the HANDLER, while the request span is still alive
+# routes.py:94 — in the HANDLER, while the request span is still alive
 link_to = current_request_context()          # ① must be read here, not in the task
 
-# tracing.py:134 — inside review_run_span, in the BACKGROUND TASK
+# tracing.py:158 — inside review_run_span, in the BACKGROUND TASK
 with tracer().start_as_current_span(
     "gate.review.run",
     context=Context(),        # ② empty context = "I refuse any parent. I am a root."
@@ -327,11 +362,40 @@ with tracer().start_as_current_span(
 `state.thread_id` is the key because it is the one identifier that reaches every node through
 checkpointed state.
 
-> **The subtlety worth internalising.** Explicit `context=` appears *only* where a task boundary
-> is crossed: node spans (LangGraph schedules them) and investigator tool spans (the Agent SDK
-> schedules those). LLM spans sit inside a node on the *same* task, within the node span's `with`
-> block, so ambient context works there and no explicit parent is needed. If you add a span and
-> wonder which to use, ask: does someone else's scheduler own the task this runs on?
+> **The subtlety worth internalising.** Explicit `context=` is *usually* a repair, applied where a
+> task boundary is crossed: node spans (LangGraph schedules them) and investigator turn and tool
+> spans (the Agent SDK schedules those). LLM spans sit inside a node on the *same* task, within
+> the node span's `with` block, so ambient context works there and no explicit parent is needed.
+> If you add a span and wonder which to use, ask: does someone else's scheduler own the task this
+> runs on?
+
+#### The one case where `context=` is not a repair
+
+`gate.investigator.run` (`agents/investigator.py:330`) passes `run_context(state.thread_id)` too —
+but here **the ambient parent is intact**. `run_investigation` is called from the `investigate`
+node, on that node's own task, inside the node span's `with` block, so ambient context would name
+`gate.node.investigate`. Passing the run context deliberately overrides that:
+
+```
+   AMBIENT would give:                    EXPLICIT gives (current behaviour):
+
+   gate.node.investigate    59.5 s        gate.node.investigate    59.5 s
+     └─ gate.investigator.run  59.4 s     gate.investigator.run    59.4 s
+          ├─ turn ×N                        ├─ turn ×N
+          └─ tool.read_file                 └─ tool.read_file
+   two spans, same duration, nested       one pipeline step, one investigation
+```
+
+`investigate` is a six-line pass-through (`graph/nodes/investigate.py`) whose entire duration *is*
+this call, so nesting buys a second box the same width as the first. Flat, the investigation reads
+as a peer of the pipeline steps.
+
+Verified by exporting the tree in memory, not by reading the code — this note replaces an earlier
+version of the span tree above that drew `gate.investigator.run` as a child of the node.
+
+Pinned by `test_tracing.py::test_the_investigator_span_is_a_peer_of_its_node_not_a_child`, which
+was confirmed to fail when the `context=` argument is removed. Before that test the shape was
+unasserted, and deleting the argument as a "cleanup" would have re-shaped the trace silently.
 
 The tempting shortcut — capture the context inside the `intake` node — is wrong in a way that
 looks fine at a glance: `intake` is itself a child of the run span, so its note says `intake`, and

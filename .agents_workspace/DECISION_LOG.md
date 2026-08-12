@@ -725,3 +725,77 @@ rather than per-page.
 **Outcome:** Thirteen pages carry breadcrumbs, nine carry prev/next footers, `index.md` lists
 every page grouped by subfolder with a "read this when" line. Link and structure checks pass; no
 source, test, or config file was touched.
+
+### Entry 27
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-12T00:00:00Z
+**Task:** Work through `docs/v2-catchup.md` §4 hands-on checks
+
+**Context:** The checkout's virtualenv had neither `pytest` nor `mypy` — `uv run` reported
+`program not found` — so §4's three free checks could not run. Installing is a state-changing
+command that was not explicitly requested.
+**Decision:** Ran `uv sync --extra dev --extra semgrep`, on the grounds that it is the repo's own
+documented install command (CLAUDE.md "Commands"), it is idempotent, and §4 is unreachable
+without it.
+**Impact / Risk:** `uv sync` makes the environment match exactly the extras named, so the first
+attempt (`--extra dev` alone) uninstalled semgrep. Both extras must be named in one command.
+Recorded as a correction in `docs/v2-catchup.md` §0, which listed them as two separate commands.
+**Outcome:** 226 passed, 14 deselected, 100.00% coverage; mypy clean on 40 files; the fixture
+semgrep scan produced the two documented hits.
+
+### Entry 28
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-12T00:00:00Z
+**Task:** Document why `gate.investigator.run` passes an explicit `context=`
+
+**Context:** While documenting the `context=` idiom, the design note's span tree
+(`docs/tracing-design.md` §2) and the code disagreed. The tree drew `gate.investigator.run` as a
+child of `gate.node.investigate`; `agents/investigator.py` passes `run_context(state.thread_id)`,
+which overrides the intact ambient parent and makes the investigation a peer of the node spans.
+Verified with a throwaway in-memory exporter run, not by reading the code: actual parent is
+`gate.review.run`. No test asserts this parent, so neither shape is pinned, and the original
+intent is not recoverable from the repo.
+
+**Decision:** Documented the current behaviour and corrected the tree to match it; did not change
+the code. Rationale for leaving it flat: `investigate` is a six-line pass-through whose duration
+is entirely the investigation, so nesting draws two spans of the same width. Changing span shape
+was outside the request, which was to record the explanation for future readers.
+
+**Impact / Risk:** The docs now match verified behaviour. The behaviour itself remains untested —
+deleting the `context=` argument as a cleanup would silently re-nest the span and no test would
+fail. A regression test asserting the parent would close that, but writing tests was not
+requested; flagged to the user instead.
+
+**Outcome:** Docstring added at `agents/investigator.py:317`; `tracing-design.md` §2 tree
+corrected, §3.2 subtlety note amended and given a subsection on this case.
+
+### Entry 29
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-12T00:00:00Z
+**Task:** Pin the investigator span's parent; verify the whole span tree
+
+**Context:** Entry 28 left the flat parenting of `gate.investigator.run` documented but unasserted.
+Verifying the rest of the tree needed a run, and a real run costs API calls.
+
+**Decision:** Pinned it in `tests/unit/test_tracing.py` (unit, not integration) by driving the
+real `investigate` node with `pr_id="no_such_pr"` — no repo snapshot, so the harness returns
+inconclusive before reaching the SDK. No stub of `run_investigation` is involved, so the test
+exercises the real `context=` argument. Confirmed it bites: with the argument temporarily removed
+the assertion fails, then restored. The rest of the tree was verified with throwaway scripts
+against an in-memory exporter rather than a paid run — the whole graph with the four LLM
+boundaries and the SDK `query` stubbed, plus a targeted script for the two edges that stubbing
+suppresses (`gate.llm.<Schema>` under a node, `gate.investigator.tool.*` under the investigation).
+
+**Impact / Risk:** Adds one unit test and no source branches; coverage stays at 100%. The stubs
+mean `gate.llm.*` parenting under *investigator* turns is inferred from the same-task call site
+plus the verified naming convention, not observed end to end — a live run would settle it.
+
+**Outcome:** 227 passed, 100.00% coverage, mypy clean on 40 files, ruff clean. Span tree in
+`docs/tracing-design.md` §2 corrected: `gate.investigator.run` is a peer of `gate.node.investigate`,
+and `gate.llm._InvestigationAnswer` was missing from the investigator's children.
