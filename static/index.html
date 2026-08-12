@@ -205,16 +205,19 @@
     // Omitted entirely when tracing is off, rather than rendered disabled: the disabled
     // convention is for controls whose backend arrives in a later iteration, and a permanently
     // dead button is worse than no button.
-    // The link opens the leg the review *started* on. A review that paused at the human gate ran
-    // as two invocations, so its second half is a separate trace the link cannot reach
-    // (tracing-design.md §7.1). Stated next to the link rather than swapped for a search URL:
-    // the base is a bare host with no project segment, so a search URL would be a second guess
-    // stacked on the deep-link's first one.
+    // Links the backend's home page, not the trace. A deep link needs Langfuse's per-version URL
+    // shape (v3.225.2 serves traces under /project/{id}/traces/{id}, earlier notes assumed
+    // /traces/{id}); that shape is not ours to own, and a link that 404s is worse than one click
+    // of navigation. The thread id is printed instead — searching it finds *both* legs of a
+    // review that paused at the human gate, which the old deep link could not reach at all
+    // (tracing-design.md §7.1).
+    // `trace_id` still gates rendering: no trace id means the run produced no trace, so there is
+    // nothing to go looking for.
     function traceLink(s) {
       if (!s.trace_id || !s.langfuse_ui_base) return "";
-      const href = `${s.langfuse_ui_base.replace(/\/$/, "")}/traces/${encodeURIComponent(s.trace_id)}`;
-      return `<a href="${esc(href)}" target="_blank" rel="noopener">View trace</a>
-        <span class="muted">first leg — search <code>gate.thread_id=${esc(s.thread_id)}</code> for all</span>`;
+      const href = s.langfuse_ui_base.replace(/\/$/, "");
+      return `<a href="${esc(href)}" target="_blank" rel="noopener">Open Langfuse</a>
+        <span class="muted">search <code>gate.thread_id=${esc(s.thread_id)}</code></span>`;
     }
 
     function findingsHtml(findings) {

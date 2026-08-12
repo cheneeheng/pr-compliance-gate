@@ -533,29 +533,30 @@ strange to add tracing without it.
 
 ## 7. Limitations
 
-### 7.1 One HITL review produces two traces — the UI links only the first
+### 7.1 One HITL review produces two traces
 
 The resume leg (`POST /decision`) opens its **own** root run span with a new `trace_id`, and
 `ReviewState.trace_id` is deliberately not overwritten (`Command(resume=…)` carries no state to
-seed, and the deep-link should keep pointing where the review started).
+seed).
 
-- **trace 1** — intake → … → human_gate. This is what the **View trace** link opens.
+- **trace 1** — intake → … → human_gate.
 - **trace 2** — human_gate resumed → verdict. Carries the *final* route and the verdict.
-  **No link from the UI.**
 
 Concretely, on fixture 003 (request_info → re-investigation → approve) the second investigation
-and its semgrep spans live in trace 2, invisible from the review page. Also `gate.loop_count.final`
-on trace 1 is not final — it is the count as of the pause.
+and its semgrep spans live in trace 2. Also `gate.loop_count.final` on trace 1 is not final — it
+is the count as of the pause.
 
-**Workaround:** search `gate.thread_id` in Langfuse; it returns both.
+**Decided 2026-08-12 — keep the two traces, and point the UI at the search term that finds both.**
+The review page renders **Open Langfuse** (the backend's home page) plus
+`search gate.thread_id=<id>`. It deliberately does *not* deep-link a trace: that needs Langfuse's
+per-version URL shape — 3.225.2 serves `/project/{projectId}/traces/{traceId}`, while an earlier
+revision of this repo assumed `/traces/{traceId}` and shipped a link that 404s. Owning another
+project's URL scheme buys one saved click and costs a dead link on every upgrade.
 
-**Decided 2026-08-12 — keep the two traces, say so in the UI.** The review page now prints
-`first leg — search gate.thread_id=<id> for all` beside the **View trace** link, so the reader
-learns the limit at the moment it matters instead of from this file. The link was *not* swapped
-for a Langfuse search URL: `GATE_LANGFUSE_UI_BASE` defaults to a bare host with no project
-segment, so a search URL would stack a second unverified guess on the deep-link's first. Making
-one trace of the two legs needs the run span's `span_id` in `ReviewState` — additive, no state
-version bump — and is worth doing only if §7.3 shows the traces arriving at all.
+The search term is `gate.thread_id` rather than the trace id on purpose: it returns **both** legs,
+which is strictly more than the old deep link could reach. Merging the two legs into one trace
+would need the run span's `span_id` in `ReviewState` — additive, no state version bump — and is
+still not obviously worth it.
 
 > Note, because an earlier reading of this was wrong: run-span attributes on the *first* leg are
 > **not** sparse. On interrupt, `ainvoke` returns every state channel already written plus
@@ -603,16 +604,43 @@ instead of ≈240. One line, no OTel surface touched, and it cuts server load as
 The deeper reason to wait: filtering spans before confirming that *any* span arrives gives a
 missing trace two possible causes at once, and §7.3 is exactly that unconfirmed.
 
-### 7.3 Never verified against a live Langfuse
+### 7.3 The endpoint path — resolved by probe, and the docs are wrong
 
-The default endpoint is `http://localhost:3000/api/public/otel`. `OTLPSpanExporter` posts to that
-URL verbatim — it appends nothing — and Langfuse has moved this path across major versions (some
-releases expect `/api/public/otel/v1/traces`).
+`OTLPSpanExporter` posts to `OTEL_EXPORTER_OTLP_ENDPOINT` **verbatim** and appends nothing, so the
+path has to be exact. Probed against a running `langfuse/langfuse:3.225.2`:
 
-The failure mode is the bad kind: Langfuse returns **404**, the exporter logs a retry warning to
-stderr and eventually drops the batch, and **the review completes perfectly**. Nothing in the app
-breaks; you get an empty Langfuse and no reason why. A missing or wrong
-`OTEL_EXPORTER_OTLP_HEADERS` gives a **401** with identical symptoms.
+| Path | With auth | Without auth |
+|---|---|---|
+| `/api/public/otel` | **404** | 404 |
+| `/api/public/otel/v1/traces` | **200** | 401 |
+
+So the `/v1/traces` suffix is **required**, not the optional "signal-specific form" the Langfuse
+integration docs describe — those name the bare `/api/public/otel` for self-hosted v3.22.0+, and
+on this image that path is a Next.js 404. The repo default carried the documented path and was
+therefore wrong from the day it was written. Fixed in `config.py`, `.env.example` and
+`OP-02-configure.md`.
+
+Read the second column too: `401` on the unauthenticated call is the proof that auth is wired
+correctly, since a 404 route cannot return 401. One `curl` pair separates the two failures that
+otherwise look identical from the application side.
+
+That is the value of probing before running a review. The failure mode is the bad kind — Langfuse
+returns 404 or 401, the exporter logs a retry warning to stderr and eventually drops the batch,
+and **the review completes perfectly**. Nothing in the app breaks; you get an empty Langfuse and
+no reason why.
+
+Two other causes were eliminated on the way, both worth recording because each produced the same
+symptom from the application's side:
+
+- **The stack was missing three required services** (§9.1). Connection refused, not 404.
+- **The compose file's `ENCRYPTION_KEY` was unquoted.** YAML read 64 zeros as a *number* and
+  Docker rendered it `"0"`; Langfuse validates 64 hex characters, so the worker crash-looped
+  while the web container started anyway. A half-alive stack that never ingests.
+
+**Closed 2026-08-12.** With the path corrected and the stack rebuilt, a fixture review's spans
+reach Langfuse and render. This section stays because the *method* is the reusable part: probe
+the endpoint with `curl` before running a review, and read both columns of the table — the
+application side cannot tell 404 from 401 from a dropped batch, but two requests can.
 
 Every assertion in the test suite runs through OTel's `InMemorySpanExporter`, which proves the
 span *tree* — parenting, links, attributes, kill switch — and proves nothing about whether
@@ -634,10 +662,79 @@ never echoes them.
 
 ## 8. Open questions for tomorrow
 
-1. Verify the OTLP ingestion path against the Langfuse image tag pinned in
-   `docker-compose.langfuse.yml`, then run one fixture review end-to-end and confirm the trace
-   renders with prompts visible. (§7.3)
-2. Decide whether to exclude the polling routes from request instrumentation. (§7.2)
-3. Decide whether the two-trace HITL split is worth fixing — options are linking trace 2 back to
-   trace 1, or surfacing both from the review page. Neither is free; the current behaviour is
-   correct, just inconvenient. (§7.1)
+1. ~~Verify ingestion end-to-end.~~ Done 2026-08-12. (§7.3)
+2. ~~Decide how the review page reaches a trace.~~ Done — home-page link plus the `gate.thread_id`
+   search term, no deep link. (§7.1)
+3. Decide whether to exclude the polling routes from request instrumentation. Now unblocked: a
+   missing trace has one cause again. (§7.2)
+4. Move the backend to Langfuse v4. (§9)
+
+---
+
+## 9. The backend: Langfuse v3, and the path to v4
+
+Nothing above depends on Langfuse. The exporter is stock OTLP/HTTP and the spans use real
+semantic conventions, so pointing `OTEL_EXPORTER_OTLP_ENDPOINT` at Jaeger or Tempo changes no
+application code. This section is about the sidecar in `docker-compose.langfuse.yml` only.
+
+### 9.1 Why the stack is six containers
+
+Langfuse v3 does **not** ingest synchronously. `langfuse-web` accepts the OTLP POST, writes the
+event body to S3-compatible blob storage and queues a job in Redis; `langfuse-worker` is what
+lands it in ClickHouse. So the minimum working stack is six services — web, worker, Postgres,
+ClickHouse, Redis, MinIO — and dropping any of the last three does not degrade ingestion, it
+removes it.
+
+This is worth stating plainly because the file got it wrong for a while. An earlier revision ran
+web + Postgres + ClickHouse, which has no path from an OTLP POST to a stored trace at any image
+tag. It is the most likely reason §7.3 stayed open: the endpoint was correct, the exporter was
+correct, and nothing arrived. The current file is derived from
+[upstream's compose at the pinned tag](https://github.com/langfuse/langfuse/blob/v3.225.3/docker-compose.yml)
+rather than hand-written, which is the cheap way to not make that class of mistake twice.
+
+The `LANGFUSE_INIT_*` block provisions org, project, user and a **fixed** API key pair on first
+boot. That is not convenience decoration: it makes `OTEL_EXPORTER_OTLP_HEADERS` a constant the
+install guide can print, and it fixes the project id, which the review page's trace deep-link
+needs (§7.1).
+
+### 9.2 Why v3 and not v4
+
+v4 is the better long-term target for this repo specifically. It replaces the legacy batch
+ingestion API with **OpenTelemetry-native ingestion** — the gate already speaks exactly that, so
+the thing v4 optimises for is the thing this codebase emits.
+
+It is deferred rather than rejected, for one reason: §7.3. Ingestion has never been confirmed to
+work end-to-end. Changing the ingestion contract *while* ingestion is unconfirmed gives a missing
+trace two possible causes at once, which is the same argument that parks the `excluded_urls`
+change in §7.2. Confirm v3 green first, then move.
+
+### 9.3 What the move actually costs
+
+Same six services — v4 introduces no new infrastructure. The work is:
+
+| Item | v3 (now) | v4 requires |
+|---|---|---|
+| ClickHouse | `24.8-alpine` | **25.12 minimum**, 26.4 recommended — the only real blocker |
+| Postgres | `16-alpine` | 15 minimum, 16 recommended — already clear |
+| Redis | `7.4-alpine` | 7.0 minimum — already clear |
+| OTLP path | `/api/public/otel/v1/traces` (§7.3) | same path, native ingestion |
+| Headers | `Authorization=Basic <b64>` | adds `x-langfuse-ingestion-version=4` |
+| Migration knobs | none | `LANGFUSE_MIGRATION_V4_WRITE_MODE`, `LANGFUSE_MIGRATION_V4_NATIVE_OTEL_BEHAVIOUR`, and friends |
+
+`OTEL_EXPORTER_OTLP_HEADERS` already parses a comma-separated list (`tracing.py:_parse_headers`),
+so adding the second header is an `.env` edit, not a code change. `Settings` reads the endpoint
+from the standard OTel variable, so that is an `.env` edit too. **The expected application diff
+for the v4 move is zero lines** — if it is not, something has leaked Langfuse-specific knowledge
+into the app, and that is the finding, not the workaround.
+
+The `LANGFUSE_MIGRATION_V4_*` write-mode knobs exist to let an established deployment dual-write
+while it migrates producers. This stack has no data worth keeping — it is a dev sidecar over a
+throwaway volume — so the migration path is to delete the volumes and start clean, not to run a
+dual-write cutover. Say so in the commit that does it, because reading the upstream guide will
+otherwise suggest a lot of ceremony that does not apply here.
+
+### 9.4 The trigger
+
+Move when §7.3 closes green and one of these is true: the ClickHouse bump is wanted anyway, a v4
+feature is actually needed, or v3 stops receiving updates. Until then the `TODO(langfuse-v4)`
+comment at the top of `docker-compose.langfuse.yml` carries the pointer back here.

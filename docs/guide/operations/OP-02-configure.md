@@ -36,7 +36,7 @@ directory.
 |---|---|---|
 | `GATE_OTEL_ENABLED` | `true` | Kill switch. `false` installs a no-op tracer: the app runs fully with no trace backend, and the UI omits the **View trace** link entirely rather than rendering a dead one. |
 | `GATE_OTEL_SERVICE_NAME` | `pr-compliance-gate` | `service.name` on every span. |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:3000/api/public/otel` | OTLP/HTTP target. **No `GATE_` prefix** — this is the OpenTelemetry SDK's own variable name, kept so anyone who has configured OTel before sets it without reading these docs. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:3000/api/public/otel/v1/traces` | OTLP/HTTP target. **No `GATE_` prefix** — this is the OpenTelemetry SDK's own variable name, kept so anyone who has configured OTel before sets it without reading these docs. |
 | `OTEL_EXPORTER_OTLP_HEADERS` | *(empty)* | `key=value,key2=value2` — carries the Langfuse basic-auth header. Also unprefixed. |
 | `GATE_LANGFUSE_UI_BASE` | `http://localhost:3000` | Used *only* to build the UI's trace deep-link. |
 

@@ -324,11 +324,11 @@ def test_enabling_tracing_builds_an_exporting_provider(monkeypatch: pytest.Monke
         app,
         Settings(
             gate_otel_enabled=True,
-            otel_exporter_otlp_endpoint="http://localhost:3000/api/public/otel",
+            otel_exporter_otlp_endpoint="http://localhost:3000/api/public/otel/v1/traces",
             otel_exporter_otlp_headers="Authorization=Basic abc",
         ),
     )
-    assert exporter_args["endpoint"] == "http://localhost:3000/api/public/otel"
+    assert exporter_args["endpoint"] == "http://localhost:3000/api/public/otel/v1/traces"
     assert exporter_args["headers"] == {"Authorization": "Basic abc"}
     try:
         assert instrumented == [app]

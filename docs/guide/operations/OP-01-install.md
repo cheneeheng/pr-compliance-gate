@@ -109,16 +109,36 @@ directory), then follow step 4 with every `uv run` prefix dropped.
    > a message naming this cause; nothing else in the pipeline is affected, which is what makes it
    > confusing to diagnose.
 
-5. Optional — start the trace backend and re-check the review detail page for a **View trace**
+5. Optional — start the trace backend and re-check the review detail page for an **Open Langfuse**
    link:
 
    ```bash
    docker compose -f docker-compose.langfuse.yml up -d
    ```
 
-   Create a Langfuse project in its UI, then put its OTLP credentials in
-   `OTEL_EXPORTER_OTLP_HEADERS` and restart the app. With `GATE_OTEL_ENABLED=false` the app runs
-   normally and the link is omitted entirely rather than rendered dead.
+   The stack provisions its own org, project, user and API keys on first boot, so there is no
+   signup step and the OTLP credentials are a constant. Put this in `.env` and restart the app:
+
+   ```
+   OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic cGstbGYtbG9jYWwtZGV2OnNrLWxmLWxvY2FsLWRldg==
+   ```
+
+   That is `base64("pk-lf-local-dev:sk-lf-local-dev")`, the fixed local-only key pair set by
+   `LANGFUSE_INIT_*` in the compose file. Sign in to the UI as `dev@example.com` /
+   `local-dev-password`. If no trace arrives, probe the endpoint before anything else — `404`
+   means the path is wrong, `401` means the header is:
+
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+     -H "Authorization: Basic cGstbGYtbG9jYWwtZGV2OnNrLWxmLWxvY2FsLWRldg==" \
+     -H 'Content-Type: application/json' --data '{}' \
+     http://localhost:3000/api/public/otel/v1/traces
+   ``` With `GATE_OTEL_ENABLED=false` the app runs normally and the link is
+   omitted entirely rather than rendered dead.
+
+   The stack is six containers, not three: Langfuse v3 ingests asynchronously through Redis and
+   S3-compatible storage, so `langfuse-worker`, `redis` and `minio` are load-bearing, not extras.
+   Give it a minute on first boot — ClickHouse migrations run at startup.
 
 ## Post-install health check
 

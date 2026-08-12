@@ -131,16 +131,18 @@ is expected, not a second failure.
 The terminal outcome — `approved`, `rejected`, or `auto_approved` — with a rationale. See
 [`HT-04-read-a-verdict.md`](HT-04-read-a-verdict.md).
 
-### View trace
+### Open Langfuse
 
-When your operator has enabled tracing, the detail page shows a **View trace** link that opens
-this review's full execution in Langfuse — every step, how long it took, and what each model call
-cost. Use it when you want to know *why* a review was slow or expensive.
+When your operator has enabled tracing, the detail page shows an **Open Langfuse** link next to a
+search term that looks like `gate.thread_id=<id>`. Open the link, paste the term into Langfuse's
+search, and you get this review's full execution — every step, how long it took, and what each
+model call cost. Use it when you want to know *why* a review was slow or expensive.
+
+Searching rather than following a direct link is deliberate, and it gives you *more*: a review
+that paused at the human gate is recorded as two separate traces, and the thread id finds both.
 
 No link means tracing is switched off, or the review ran before it was enabled. That is not a
-failure. One caveat worth knowing: if the review paused at the human gate, the link opens the part
-*before* the pause. To see what happened after your decision, search the review's thread id in
-Langfuse.
+failure.
 
 ## Watch progress
 

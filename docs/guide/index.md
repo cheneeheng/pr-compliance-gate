@@ -88,7 +88,7 @@ when the operator pages are not enough.
 | **Checkpoint** | The saved state written after every pipeline step, which is why a review waiting at the human gate survives a restart. |
 | **Thread id** | The identifier for one review, used in every `/api/reviews/{thread_id}` URL. |
 | **Policy corpus** | The Markdown policies in `data/policies/`. `index.yaml` maps each change type to the files that govern it, so retrieval is a deterministic file lookup — there is no vector store and no ingestion step. |
-| **Trace** | The record of one review's execution, exported to Langfuse when tracing is enabled. The detail page links to it as **View trace**. |
+| **Trace** | The record of one review's execution, exported to Langfuse when tracing is enabled. The detail page shows an **Open Langfuse** link and the `gate.thread_id` term to search for it. |
 
 ## How the pipeline works (one paragraph)
 

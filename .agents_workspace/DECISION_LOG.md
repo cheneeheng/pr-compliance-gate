@@ -831,3 +831,56 @@ change without the reviewer acting in the same page.
 
 **Outcome:** Shipped in `a4b8a71`. Default suite 228 passed, coverage 100%, page script passes
 `node --check`. Rendered result not visually verified.
+
+### Entry 31
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-12T00:00:00Z
+**Task:** Rewrite `docker-compose.langfuse.yml` so OTLP ingestion can actually be verified (§7.3).
+
+**Context:** The file ran three services (langfuse, postgres, clickhouse). Langfuse v3 requires
+six: ingestion is asynchronous through Redis and S3-compatible storage, with a separate worker
+landing events in ClickHouse. So no trace could ever have arrived, at any image tag — which is
+the probable reason `tracing-design.md` §7.3 was never closed. Three forks had to be resolved.
+
+**Decision:**
+1. **v3.225.3, not v4.10.** v4 makes OTel the primary ingestion API and is the better long-term
+   target, but it costs a ClickHouse bump (25.12 min), an extra `x-langfuse-ingestion-version=4`
+   header and the `LANGFUSE_MIGRATION_V4_*` knobs. Changing the ingestion contract while
+   ingestion is unconfirmed gives a missing trace two causes at once — the exact trap §7.3
+   warns about. Recorded as `TODO(langfuse-v4)` in the file header and in `v2-catchup.md` §5.
+2. **Kept the S3 media-upload block** even though this repo's spans carry no media. The goal of
+   this change is removing causes of silent failure, not minimising YAML; an untested trim would
+   reintroduce ambiguity. Batch export, Azure, OCI, SMTP and Redis TLS were dropped because the
+   image defaults them off explicitly.
+3. **Kept ClickHouse at 24.8-alpine.** Above v3's documented 24.3 floor and already in the repo;
+   bumping toward v4's 25.12 floor now would be an untested change bundled into a change whose
+   whole point is to isolate one variable.
+
+Also added `LANGFUSE_INIT_*` so the stack provisions its own org, project, user and API keys.
+That removes the manual signup step, makes `OTEL_EXPORTER_OTLP_HEADERS` a documented constant,
+and fixes the project id — which the `static/index.html` trace deep-link will need.
+
+**Impact / Risk:** Six containers instead of three; heavier local footprint. Credentials are
+local-only placeholders carried over from upstream. No application code touched. Not run.
+
+**Outcome:** `docker compose config` validates. No pre-existing `langfuse-*` volumes, so first
+boot is clean.
+
+**Outcome (same day, after bringing it up):** ingestion verified working. Four defects stood
+between the stack and a trace, each producing the same symptom from the application side:
+1. The ClickHouse healthcheck probed `localhost`, which busybox wget resolves to `[::1]`; the
+   container has no IPv6, so a healthy database failed its check forever and `depends_on` held
+   web and worker in `Created`. Now `127.0.0.1`.
+2. `ENCRYPTION_KEY` was unquoted — YAML read 64 zeros as a number, Docker rendered `"0"`, and the
+   worker crash-looped on Langfuse's 64-hex-character check while web started anyway. Now quoted.
+3. `LANGFUSE_INIT_USER_EMAIL: dev@localhost` failed Langfuse's email validation. Now
+   `dev@example.com`.
+4. **The repo's OTLP endpoint default was wrong.** Probing 3.225.2: `POST /api/public/otel` →
+   404, `POST /api/public/otel/v1/traces` → 200 with auth, 401 without. Langfuse's own
+   integration docs name the bare path for self-hosted v3.22.0+; on this image it does not exist.
+   Fixed in `config.py`, `.env.example`, `OP-02-configure.md` and `test_tracing.py`.
+
+The 401-vs-404 probe is the transferable part: the application cannot distinguish a wrong path
+from wrong credentials from a dropped batch, and two curl requests can.

@@ -60,7 +60,12 @@ class Settings(BaseSettings):
     # everywhere else), so it is worth keeping them on the standard names.
     gate_otel_enabled: bool = True
     gate_otel_service_name: str = "pr-compliance-gate"
-    otel_exporter_otlp_endpoint: str = "http://localhost:3000/api/public/otel"
+    # The `/v1/traces` suffix is required, not optional. `OTLPSpanExporter` posts to this URL
+    # verbatim and appends nothing, and Langfuse 3.225.2 serves OTLP only at the signal-specific
+    # path — a POST to the bare `/api/public/otel` its docs name returns a Next.js 404, which the
+    # exporter reports as a dropped batch while the review completes perfectly. Verified by probe,
+    # see `docs/tracing-design.md` §7.3.
+    otel_exporter_otlp_endpoint: str = "http://localhost:3000/api/public/otel/v1/traces"
     otel_exporter_otlp_headers: str = ""
     # Used only to build the UI's trace deep-link; server config, never review state.
     gate_langfuse_ui_base: str = "http://localhost:3000"
