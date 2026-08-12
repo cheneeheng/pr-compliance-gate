@@ -40,7 +40,7 @@ Within a folder, read in `HT-`/`OP-` order; each page assumes only what came bef
 - [HT-02 — How to decide at the human gate](how-to/HT-02-decide-at-the-human-gate.md) — read this
   when a review is waiting on your **Approve**, **Reject**, or **Request more info**.
 - [HT-03 — How to run the demo script](how-to/HT-03-run-the-demo-script.md) — read this when you
-  want all three demo reviews narrated in a terminal instead of clicked through the UI.
+  want the demo reviews narrated in a terminal instead of clicked through the UI.
 - [HT-04 — How to read a verdict](how-to/HT-04-read-a-verdict.md) — read this when a review has
   finished and you want to know what drove the outcome.
 

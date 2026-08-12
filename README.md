@@ -22,9 +22,10 @@ auth, and the token it uses is read-only: the gate never comments, labels or mer
 ## Install
 
 **Not published to PyPI.** The project is packaged and release-ready — the policy corpus, PR
-fixtures, and UI are bundled into the wheel, so an installed copy runs without a checkout — but it
-stays unpublished until it is useful for productive work, which means live GitHub intake rather
-than local fixtures. Until then, install from a checkout:
+fixtures, and UI are bundled into the wheel, so an installed copy runs without a checkout. The hold
+that kept it unpublished (live GitHub intake, shipped in v0.2.0) is lifted, but publishing is a
+separate decision this release has not taken; see the note at the end of this file. Install from a
+checkout:
 
 ```bash
 uv sync --extra dev                       # install, including dev tooling
@@ -226,10 +227,11 @@ against a local bare repo; the default suite makes no network call at all.
 See `.agents_workspace/planning/v2`.
 
 PyPI publication was held behind live GitHub intake, on the grounds that a package implying "worth
-installing for real work" should not read pull requests from local fixtures. That intake now
-exists, so the hold is lifted: publication is a release decision (rename
-`.github/workflows/publish.yml.disabled` back to `.yml`), not a scope question. GitHub only
-registers `.yml`/`.yaml` files, so no trigger in it can fire until then.
+installing for real work" should not read pull requests from local fixtures. That intake shipped in
+v0.2.0, so the hold is lifted: publication is a release decision (rename
+`.github/workflows/publish.yml.disabled` back to `.yml`, and complete the one-time Trusted
+Publishing setup its header describes), not a scope question. v0.2.0 did not take that decision —
+GitHub only registers `.yml`/`.yaml` files, so no trigger in the workflow can fire meanwhile.
 
 ## License
 

@@ -22,7 +22,8 @@ jobs:
         with:
           enable-cache: true
 
-      # The default pytest run is `-m 'not llm'`, so no API key is needed and nothing is spent.
+      # The default pytest run is `-m 'not llm and not network'`, so no API key is needed, nothing
+      # is spent, and no leg depends on GitHub being reachable.
       # The pinned semgrep is installed because both matrix interpreters have a wheel for it; a
       # leg whose interpreter it has not caught up with would drop the extra and still run the
       # full unit suite, since every semgrep path there is stubbed against a fake subprocess.

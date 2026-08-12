@@ -884,3 +884,41 @@ between the stack and a trace, each producing the same symptom from the applicat
 
 The 401-vs-404 probe is the transferable part: the application cannot distinguish a wrong path
 from wrong credentials from a dropped batch, and two curl requests can.
+
+---
+
+### Entry 32
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-12T00:00:00Z
+**Task:** Prepare the repository for the v0.2.0 release.
+
+**Context:** `pip-audit` over the locked runtime dependencies reported five vulnerabilities in
+three packages. Two were straightforward — `cryptography` 49.0.0 and
+`langgraph-checkpoint-sqlite` 3.1.0 both had fixes inside the existing constraints, so the lock
+moved and nothing else did. The other three (PYSEC-2026-3481, -3482, -3483) are all in `mcp`
+1.23.3, and the fixes are 1.27.2 / 1.28.1. `uv lock --upgrade-package "mcp>=1.28.1"` fails:
+`semgrep==1.172.0` pins `mcp==1.23.3` exactly, and 1.172.0 is the current latest semgrep. So the
+options were (a) unpin or drop the semgrep extra, (b) ignore the three advisories with a
+justification.
+
+**Decision:** (b). All three advisories are in the *server* half of `mcp`: HTTP/SSE session
+hijack, the deprecated WebSocket transport's missing Host/Origin validation, and the experimental
+tasks feature's cross-session access. This project imports `ClientSession` and `stdio_client` only
+(`intake/sources/github_mcp.py`) and never runs an MCP server, so none of the vulnerable code
+paths are reachable. Unpinning semgrep to chase them would trade a non-applicable advisory for a
+real one — the exact pin exists because rule behaviour moves between minors and an unpinned
+scanner makes the demo non-reproducible and the evals flaky.
+
+The three ids replace the `chromadb` PYSEC-2026-311 entry in `publish.yml.disabled`, which went
+stale when v2 removed Chroma. A stale `--ignore-vuln` is worse than none: it silently exempts
+whatever id gets reused and reads as a considered exemption.
+
+**Impact / Risk:** The release audit passes with three named exemptions rather than zero. The
+exemptions are documented at the ignore site with the reason each does not apply and the
+condition that retires them (semgrep relaxing its `mcp` pin). Risk if that reasoning is wrong:
+the gate would need an MCP server surface to be exposed, which it does not have.
+
+**Outcome:** Post-upgrade audit reports three vulnerabilities in one package, all `mcp`, all
+exempted. Full suite green against the upgraded lock: 228 passed, 100% coverage.
