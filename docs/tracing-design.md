@@ -549,6 +549,14 @@ on trace 1 is not final — it is the count as of the pause.
 
 **Workaround:** search `gate.thread_id` in Langfuse; it returns both.
 
+**Decided 2026-08-12 — keep the two traces, say so in the UI.** The review page now prints
+`first leg — search gate.thread_id=<id> for all` beside the **View trace** link, so the reader
+learns the limit at the moment it matters instead of from this file. The link was *not* swapped
+for a Langfuse search URL: `GATE_LANGFUSE_UI_BASE` defaults to a bare host with no project
+segment, so a search URL would stack a second unverified guess on the deep-link's first. Making
+one trace of the two legs needs the run span's `span_id` in `ReviewState` — additive, no state
+version bump — and is worth doing only if §7.3 shows the traces arriving at all.
+
 > Note, because an earlier reading of this was wrong: run-span attributes on the *first* leg are
 > **not** sparse. On interrupt, `ainvoke` returns every state channel already written plus
 > `__interrupt__` — verified:
@@ -579,6 +587,21 @@ FastAPIInstrumentor.instrument_app(app, tracer_provider=provider, excluded_urls=
 
 **Untested.** Verify the parameter name and pattern against the installed
 `opentelemetry-instrumentation-fastapi` before relying on it.
+
+**Decided 2026-08-12 — back the polling off, leave the spans unfiltered.** The detail view now
+polls every **10 s** while a review is `awaiting_human` and every 2 s otherwise
+(`static/index.html`, `schedule()`). The same four minutes at the gate produce ≈48 request traces
+instead of ≈240. One line, no OTel surface touched, and it cuts server load as a side effect.
+
+`excluded_urls` stays unapplied until §7.3 closes, for two reasons:
+
+- The parameter name and matching semantics are still unverified against the installed package.
+- `api/reviews/.+` is too broad — it also matches `POST /api/reviews/{id}/decision`, a real human
+  action worth tracing. A pattern that excludes only the two `GET` polls has to do that work
+  itself, since `excluded_urls` matches on path without regard to method.
+
+The deeper reason to wait: filtering spans before confirming that *any* span arrives gives a
+missing trace two possible causes at once, and §7.3 is exactly that unconfirmed.
 
 ### 7.3 Never verified against a live Langfuse
 

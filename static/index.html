@@ -75,7 +75,19 @@
     const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
     let pollTimer = null;
-    const stopPolling = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } };
+    let pollMs = 0;
+    const stopPolling = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } pollMs = 0; };
+
+    // Every poll is an HTTP request, and every request is its own single-span trace
+    // (tracing-design.md §7.2) — so the detail view's cadence *is* trace volume. Parked at the
+    // human gate nothing changes until the reviewer acts, so back off 2s -> 10s there: four
+    // minutes of reading drops from ~120 polls to ~24.
+    function schedule(threadId, ms) {
+      if (ms === pollMs) return;
+      stopPolling();
+      pollMs = ms;
+      pollTimer = setInterval(() => pollDetail(threadId), ms);
+    }
 
     function showError(msg) {
       document.getElementById("banner-slot").innerHTML = `<div class="banner" role="alert">${esc(msg)}</div>`;
@@ -193,10 +205,16 @@
     // Omitted entirely when tracing is off, rather than rendered disabled: the disabled
     // convention is for controls whose backend arrives in a later iteration, and a permanently
     // dead button is worse than no button.
+    // The link opens the leg the review *started* on. A review that paused at the human gate ran
+    // as two invocations, so its second half is a separate trace the link cannot reach
+    // (tracing-design.md §7.1). Stated next to the link rather than swapped for a search URL:
+    // the base is a bare host with no project segment, so a search URL would be a second guess
+    // stacked on the deep-link's first one.
     function traceLink(s) {
       if (!s.trace_id || !s.langfuse_ui_base) return "";
       const href = `${s.langfuse_ui_base.replace(/\/$/, "")}/traces/${encodeURIComponent(s.trace_id)}`;
-      return `<a href="${esc(href)}" target="_blank" rel="noopener">View trace</a>`;
+      return `<a href="${esc(href)}" target="_blank" rel="noopener">View trace</a>
+        <span class="muted">first leg — search <code>gate.thread_id=${esc(s.thread_id)}</code> for all</span>`;
     }
 
     function findingsHtml(findings) {
@@ -289,6 +307,7 @@
         if (state.status === "failed") showError("Review failed: " + (state.error || "see the server log"));
         else clearError();
         if (state.status === "done" || state.status === "failed") stopPolling();
+        else schedule(threadId, state.status === "awaiting_human" ? 10000 : 2000);
       } catch (e) {
         if (e.status === 404) { showError("Review not found."); stopPolling(); }
         else { showError("Connection issue: " + e.message); }
@@ -299,7 +318,7 @@
       stopPolling();
       document.getElementById("view").innerHTML = `<div class="spinner">Loading review…</div>`;
       pollDetail(threadId);
-      pollTimer = setInterval(() => pollDetail(threadId), 2000);
+      schedule(threadId, 2000);
     }
 
     document.getElementById("home-link").onclick = renderList;
