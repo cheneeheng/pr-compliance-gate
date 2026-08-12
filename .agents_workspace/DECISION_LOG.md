@@ -799,3 +799,35 @@ plus the verified naming convention, not observed end to end — a live run woul
 **Outcome:** 227 passed, 100.00% coverage, mypy clean on 40 files, ruff clean. Span tree in
 `docs/tracing-design.md` §2 corrected: `gate.investigator.run` is a peer of `gate.node.investigate`,
 and `gate.llm._InvestigationAnswer` was missing from the investigator's children.
+
+---
+
+### Entry 30
+
+**Type:** Decision
+**Mode:** Autonomous
+**Timestamp:** 2026-08-12T15:40:00Z
+**Task:** Close tracing-design §7.1 and §7.2, the two open items in docs/v2-catchup.md §5.
+
+**Context:** The user approved two suggestions: (§7.1) replace the UI's Langfuse deep-link with a
+`gate.thread_id` search URL so both legs of a paused review are reachable, and (§7.2) back the
+detail poll off at the human gate instead of applying the untested `excluded_urls` filter.
+Implementing §7.1 revealed the suggestion was unsound: `gate_langfuse_ui_base` defaults to
+`http://localhost:3000`, a bare host with no project segment, so the existing `/traces/{id}` link
+is already an unverified guess at Langfuse's URL shape (§7.3 has never confirmed it). A search URL
+would need a second guess — the query-parameter name — stacked on the first.
+
+**Decision:** §7.2 implemented as approved (10 s poll at `awaiting_human`, 2 s otherwise).
+§7.1 deviated from the approved option: kept the deep-link and added a muted note beside it naming
+the `gate.thread_id` to search for the other leg. A wrong link is worse than a correct link with a
+stated limit, and the note costs one template line against a state change plus an unverifiable URL.
+Both decisions recorded in `tracing-design.md` §7.1/§7.2 and in `v2-catchup.md` §5.
+
+**Impact / Risk:** Neither item is closed in the sense of fixed — both are deliberately parked
+behind §7.3 (OTLP ingestion never verified against a live Langfuse). If §7.3 closes and the URL
+shape turns out to differ, the deep-link and the note both need revisiting together. The poll
+backoff makes a review at the gate refresh up to 10 s stale; acceptable because the state cannot
+change without the reviewer acting in the same page.
+
+**Outcome:** Shipped in `a4b8a71`. Default suite 228 passed, coverage 100%, page script passes
+`node --check`. Rendered result not visually verified.
