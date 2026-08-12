@@ -40,8 +40,72 @@ repository happen afterwards in the background; failures there become an escalat
 that already exists, not an HTTP error.
 
 The detail response is the full review state plus two added fields: `status` (derived) and
-`langfuse_ui_base` (server config, empty when tracing is disabled). Review state itself carries
-`source`, `pr_ref` for live pull requests, `workspace_path`, and `trace_id`.
+`langfuse_ui_base` (server config, empty when tracing is disabled). Review state itself is
+documented below.
+
+## Review state
+
+One `ReviewState` object per review, checkpointed to SQLite after every pipeline step. It is the
+body of `GET /api/reviews/{thread_id}`, and it is what a checkpoint holds.
+
+| Field | Type | Written by | Notes |
+|---|---|---|---|
+| `pr_id` | string | the source adapter | A fixture directory name, or `owner/repo#number` for a live pull request. |
+| `thread_id` | string | the source adapter | The review id used in every `/api/reviews/{thread_id}` URL. |
+| `trace_id` | string or `null` | the source adapter | 32 hex characters. `null` when tracing is disabled. |
+| `source` | `fixture` or `github` | the source adapter | |
+| `pr_ref` | `PRRef` or `null` | the source adapter | Live pull requests only. |
+| `workspace_path` | string or `null` | the source adapter | The investigator's sandbox root. `null` when the load failed before materializing one. |
+| `diff` | string | the source adapter | The unified diff. Empty when the load failed. |
+| `files_changed` | array of string | the source adapter | Parsed from the diff's `diff --git` headers. |
+| `policy_context` | array of `PolicyChunk` | `retrieve_policy` | Every section of every mapped policy file. |
+| `classification` | `Classification` or `null` | `classify` | |
+| `risk` | `RiskAssessment` or `null` | `risk_score` | |
+| `specialist_findings` | array of `Finding` | both specialists | Merged per specialist — see *Channels that do not overwrite*. |
+| `investigation` | `InvestigationReport` or `null` | `investigate` | The most recent round only. |
+| `loop_count` | integer | `investigate` | Investigation rounds used, against `GATE_MAX_CYCLES`. Only `investigate` increments it, so resuming from a checkpoint cannot double-count. |
+| `escalation` | `EscalationRecord` or `null` | the source adapter, either specialist, or `reconcile` | First write wins — see *Channels that do not overwrite*. |
+| `human_decision` | `HumanDecision` or `null` | `human_gate`, on resume | |
+| `verdict` | `Verdict` or `null` | `verdict` | Populated means the review is `done`. |
+| `route` | string or `null` | `reconcile` | Internal: the routing decision the next edge reads. |
+
+The source adapter writes its fields in the background task, **before** the first step runs. So a
+review whose load failed still carries a `pr_id`, a `source` and an `escalation` — and nothing
+that a model would have produced.
+
+### Nested objects
+
+| Object | Fields |
+|---|---|
+| `PRRef` | `owner`, `repo`, `number`, `head_sha`, `base_sha`, `html_url`, `title` |
+| `PolicyChunk` | `text`, `policy_id`, `source_file`. No similarity score: retrieval does not rank. |
+| `Classification` | `change_type`, `summary`, `touched_areas` (array of string) |
+| `RiskAssessment` | `score` (0–100), `level`, `reasons` (array of string), `model_used` |
+| `Finding` | `specialist`, `severity`, `policy_id`, `description`, `confidence` (0.0–1.0), `needs_more_context` |
+| `InvestigationReport` | `summary`, `findings` (array of string), `files_examined`, `tool_calls_count`, `cost_estimate_usd`, `static_analysis` (array of `StaticFinding`), `semgrep_runs` |
+| `StaticFinding` | `rule_id`, `severity`, `path`, `line`, `message` |
+| `EscalationRecord` | `reason`, `detail` |
+| `HumanDecision` | `action`, `note`, `decided_at` |
+| `Verdict` | `outcome`, `rationale` |
+
+Every enumerated value above is listed under [Statuses and enumerations](#statuses-and-enumerations).
+
+On `InvestigationReport`, the model authors `summary` and `findings` only. Every count —
+`tool_calls_count`, `files_examined`, `cost_estimate_usd`, `static_analysis`, `semgrep_runs` — is
+measured by the harness.
+
+### Channels that do not overwrite
+
+Two fields have more than one writer, so both need a merge rule:
+
+- **`specialist_findings`.** A fresh batch from one specialist replaces that specialist's earlier
+  findings and leaves the other specialist's untouched. Without this, a second investigation round
+  would pile on top of the first, and a question already answered would still read as
+  `needs_more_context` forever.
+- **`escalation`.** The first write wins. Both specialists run in the same parallel step, so both
+  can escalate at once.
+
+Every other field is last-write-wins.
 
 ## Statuses and enumerations
 

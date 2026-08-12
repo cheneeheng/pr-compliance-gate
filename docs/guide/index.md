@@ -30,8 +30,8 @@ Within a folder, read in `HT-`/`OP-` order; each page assumes only what came bef
   used the gate before.
 - [Troubleshooting](troubleshooting.md) — read this when something in the browser looks wrong and
   you want the symptom-to-fix table.
-- [Reference](reference.md) — read this when you need the HTTP API, an exact enum value, a span
-  name, or the file layout.
+- [Reference](reference.md) — read this when you need the HTTP API, a review-state field, an exact
+  enum value, a span name, or the file layout.
 
 ### `how-to/` (reviewer)
 
