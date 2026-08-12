@@ -19,8 +19,5 @@ checkpoints.db-*
 # Derived: shallow clones of live pull requests, re-created on demand
 data/workspaces/
 
-# Agent session
-.agents_workspace/handoff/
-
 # Coverage
 .coverage
