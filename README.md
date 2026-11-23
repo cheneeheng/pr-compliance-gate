@@ -224,8 +224,6 @@ against a local bare repo; the default suite makes no network call at all.
   semantic similarity separates them. Raw policy count is not the trigger; 2,000 policies cleanly
   partitioned by category are still a lookup problem
 
-See `.agents_workspace/planning/v2`.
-
 PyPI publication was held behind live GitHub intake, on the grounds that a package implying "worth
 installing for real work" should not read pull requests from local fixtures. That intake shipped in
 v0.2.0, so the hold is lifted: publication is a release decision (rename

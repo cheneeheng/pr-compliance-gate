@@ -21,3 +21,6 @@ data/workspaces/
 
 # Coverage
 .coverage
+
+# Agent workspace: a nested checkout of this project's branch in a separate repository
+.agents_workspace/
