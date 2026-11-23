@@ -12,6 +12,13 @@ condition was live GitHub intake, which it ships — but did not act on it. Publ
 one-time Trusted Publishing setup on pypi.org and `.github/workflows/publish.yml.disabled` renamed
 back to `.yml`; until that lands, install from a checkout or a wheel you build yourself.
 
+### Removed
+
+- Stop tracking the `.agents_workspace/` planning material (iteration plans, `ARCHITECTURE.md`,
+  the decision log, the v2 backlog) in this repository. Code comments that cite `ITER_*`,
+  `SKELETON` or `DECISION_LOG` entries refer to those files, which remain in the history up to
+  v0.2.0.
+
 ## [0.2.0] - 2026-08-12
 
 The v2 plan family: live GitHub intake, end-to-end tracing, deterministic policy retrieval, and

@@ -235,4 +235,5 @@ mcp-cassette record/replay, prompt benchmarking beyond fixture smoke evals, writ
 GitHub (the token is read-only by design), webhook/GitHub-App triggers, auth/multi-user, hosted
 deployment *of the application* (the Langfuse compose file is a dev-time sidecar), pagination on
 list endpoints, org-wide policy sync, and embedding-based retrieval (revisit only at the threshold
-documented in `ITER_01_v2 §02`). See `.agents_workspace/planning/v2`.
+documented in `ITER_01_v2 §02`). See `.agents_workspace/product/plan/v2`
+(the workspace is a separate, untracked checkout).
